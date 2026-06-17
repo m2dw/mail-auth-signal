@@ -63,11 +63,9 @@ describe("extractDkimSigningDomain", () => {
     expect(extractDkimSigningDomain("(evil.test)")).toBeNull();
   });
 
-  it("rejects a comment-derived value with a stray paren the property parser folded in", () => {
-    // `header.d=example.com (header.d=evil.test)` leaves the trailing
-    // `evil.test)` after the property parser overwrites header.d. A stray
-    // closing paren is outside the host charset, so it is rejected rather than
-    // accepted as a signing domain.
+  it("rejects a value carrying a stray paren rather than accepting it as a domain", () => {
+    // A closing paren is outside the host charset, so a value like `evil.test)`
+    // is rejected rather than accepted as a signing domain.
     expect(extractDkimSigningDomain("evil.test)")).toBeNull();
   });
 });
@@ -228,17 +226,34 @@ describe("dkimDomainMismatchRule — missing/malformed input stays silent", () =
     expect(dkimSignals(result)).toEqual([]);
   });
 
-  it("does not fabricate a mismatch from a property-shaped comment after an aligned header.d", () => {
-    // The property parser overwrites header.d with the comment's `evil.test)`,
-    // but the trailing paren is outside the host charset, so the comment-derived
-    // value is dropped. The real signing domain aligned with From, so the rule
-    // must stay silent rather than report a spurious dkim.domainMismatch.
+  it("ignores a property-shaped comment after an aligned header.d (reads the real signer)", () => {
+    // The comment carries its own `header.d=evil.test`, but comments are RFC 5322
+    // CFWS and are stripped before parsing, so the real signing domain wins. It
+    // aligns with From, so the rule stays silent.
     const result = analyzeMessage(
       message("Example <a@example.com>", "dkim=pass header.d=example.com (header.d=evil.test)"),
     );
-    expect(result.metrics.dkimDomains).toEqual([]);
-    expect(result.metrics.dkimDomainMatchesFromDomain).toBeNull();
+    expect(result.metrics.dkimDomains).toEqual(["example.com"]);
+    expect(result.metrics.dkimDomainMatchesFromDomain).toBe(true);
     expect(dkimSignals(result)).toEqual([]);
+  });
+
+  it("reads the real header.d, not a comment, when the comment hides the genuine mismatch", () => {
+    // `header.d=evil.test (header.d=example.com )` is the attacker pattern: the
+    // real signer is evil.test, but a comment supplies a From-aligned token.
+    // Comments are stripped before parsing, so the genuine mismatch surfaces
+    // rather than being suppressed by the comment's property-shaped text.
+    const result = analyzeMessage(
+      message("Example <a@example.com>", "dkim=pass header.d=evil.test (header.d=example.com )"),
+    );
+    expect(result.metrics.dkimDomains).toEqual(["evil.test"]);
+    expect(result.metrics.dkimDomainMatchesFromDomain).toBe(false);
+    expect(dkimSignals(result)).toHaveLength(1);
+    expect(dkimSignals(result)[0]?.data).toEqual({
+      fromDomain: "example.com",
+      dkimDomains: ["evil.test"],
+      mismatchedDomains: ["evil.test"],
+    });
   });
 });
 
