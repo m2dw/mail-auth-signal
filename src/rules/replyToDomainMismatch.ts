@@ -39,6 +39,7 @@ export const replyToDomainMismatchRule: Rule = {
     return [
       {
         key: "replyTo.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "Reply-To domain differs from the From domain.",
         data: {

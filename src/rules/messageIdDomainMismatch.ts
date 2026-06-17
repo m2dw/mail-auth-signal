@@ -29,14 +29,21 @@ export const messageIdDomainMismatchRule: Rule = {
   description: "The Message-ID domain does not match the From domain.",
   evaluate({ metrics }) {
     if (metrics.messageIdDomainMatchesFromDomain !== false) return [];
+    // The match is false only when both domains resolved and differ, so the
+    // single Message-ID domain is the lone divergent one. Reported as a
+    // mismatchedDomains array too, so every consistency signal carries the same
+    // divergent-domain field shape regardless of how many domains it compares.
+    const mismatchedDomains = metrics.messageIdDomain === null ? [] : [metrics.messageIdDomain];
     return [
       {
         key: "messageId.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "Message-ID domain differs from the From domain.",
         data: {
           fromDomain: metrics.fromDomain,
           messageIdDomain: metrics.messageIdDomain,
+          mismatchedDomains,
         },
       },
     ];

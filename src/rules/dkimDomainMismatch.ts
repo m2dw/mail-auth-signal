@@ -52,6 +52,7 @@ export const dkimDomainMismatchRule: Rule = {
     return [
       {
         key: "dkim.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "DKIM header.d signing domain differs from the From domain.",
         data: {

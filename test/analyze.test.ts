@@ -49,7 +49,7 @@ describe("analyzeMessage", () => {
     expect(result.metrics.messageIdDomain).toBe("mailer.example.net");
     expect(result.metrics.messageIdDomainMatchesFromDomain).toBe(false);
     expect(result.signals.map((signal) => signal.key)).toEqual([
-      "auth.dmarc.fail",
+      "auth.method.failure",
       "messageId.domainMismatch",
     ]);
   });
@@ -61,7 +61,8 @@ describe("analyzeMessage", () => {
       },
     });
 
-    expect(result.signals[0]?.key).toBe("authResults.missing");
+    expect(result.signals[0]?.key).toBe("auth.results.missing");
+    expect(result.signals[0]?.category).toBe("absence");
   });
 });
 
@@ -91,7 +92,7 @@ describe("analysis API boundary", () => {
     const signals = runRules(metrics, dmarcFailInput.options);
 
     expect(signals.map((signal) => signal.key)).toEqual([
-      "auth.dmarc.fail",
+      "auth.method.failure",
       "messageId.domainMismatch",
     ]);
   });
@@ -106,12 +107,12 @@ describe("analysis API boundary", () => {
 
     const trustedSignals = runRules(metrics, { trustedAuthservIds: ["mx.example.net"] });
     expect(trustedSignals.map((signal) => signal.key)).not.toContain(
-      "authResults.untrustedAuthservId",
+      "auth.results.untrusted",
     );
 
     const untrustedSignals = runRules(metrics, {});
     expect(untrustedSignals.map((signal) => signal.key)).toContain(
-      "authResults.untrustedAuthservId",
+      "auth.results.untrusted",
     );
   });
 
@@ -127,7 +128,7 @@ describe("analysis API boundary", () => {
     const viaAnalyze = analyzeMessage(dmarcFailInput).signals;
 
     expect(separated.map((signal) => signal.key)).not.toContain(
-      "authResults.untrustedAuthservId",
+      "auth.results.untrusted",
     );
     expect(separated).toEqual(viaAnalyze);
   });
@@ -153,10 +154,13 @@ describe("analysis API boundary", () => {
       (signal) => signal.key,
     );
 
+    // Both Authentication-Results failures now share the stable auth.method.failure
+    // key; the per-header ordering still places the first header's failure ahead of
+    // the second header's untrusted-source signal and its own failure.
     expect(fromAnalyze).toEqual([
-      "auth.spf.fail",
-      "authResults.untrustedAuthservId",
-      "auth.dkim.fail",
+      "auth.method.failure",
+      "auth.results.untrusted",
+      "auth.method.failure",
     ]);
     expect(fromRunRules).toEqual(fromAnalyze);
   });

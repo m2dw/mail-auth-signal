@@ -19,14 +19,15 @@ import type { Rule } from "../types.js";
  * than treating every already-trusted header as untrusted.
  */
 export const untrustedAuthservIdRule: Rule = {
-  key: "authResults.untrustedAuthservId",
+  key: "auth.results.untrusted",
   scope: "header",
   description: "An Authentication-Results header came from an untrusted authserv-id.",
   evaluate({ metrics, options }) {
     return metrics.authenticationResults
       .filter((header) => !resolveHeaderTrust(header, options))
       .map((header) => ({
-        key: "authResults.untrustedAuthservId",
+        key: "auth.results.untrusted",
+        category: "trust" as const,
         severity: "low" as const,
         message: "Authentication-Results header was produced by an untrusted authserv-id.",
         data: { authservId: header.authservId },

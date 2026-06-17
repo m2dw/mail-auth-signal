@@ -129,9 +129,14 @@ describe("returnPathDomainMismatchRule", () => {
     expect(signals).toEqual([
       {
         key: "returnPath.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "Return-Path domain differs from the From domain.",
-        data: { fromDomain: "example.com", returnPathDomain: "evil.test" },
+        data: {
+          fromDomain: "example.com",
+          returnPathDomain: "evil.test",
+          mismatchedDomains: ["evil.test"],
+        },
       },
     ]);
   });
@@ -184,6 +189,7 @@ describe("smtpMailfromDomainMismatchRule", () => {
     expect(signals).toEqual([
       {
         key: "smtpMailfrom.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "SPF smtp.mailfrom domain differs from the From domain.",
         data: {
@@ -254,12 +260,13 @@ describe("envelopeSenderDisagreementRule", () => {
     expect(signals).toEqual([
       {
         key: "envelopeSender.domainDisagreement",
+        category: "consistency",
         severity: "low",
         message: "Return-Path domain differs from the SPF smtp.mailfrom domain.",
         data: {
           returnPathDomain: "example.com",
           smtpMailfromDomains: ["evil.test"],
-          disagreeingDomains: ["evil.test"],
+          mismatchedDomains: ["evil.test"],
         },
       },
     ]);

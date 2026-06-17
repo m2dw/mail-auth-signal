@@ -121,11 +121,42 @@ The `test/fixtures/*.json` files are JSON fixtures (input + expected
 `AnalyzeResult`) that pin the serializable output shape for tests and
 cross-language ports.
 
+## Signal taxonomy
+
+Every signal carries a stable `key`, a coarse `category`, a `severity`, a
+human-readable `message`, and (for most) a serializable `data` payload. The
+`category` lets callers group or route signals without string-matching keys, and
+draws the distinctions the surface must keep separate — an input that is absent,
+a source that is untrusted, an authentication failure, and a domain-consistency
+mismatch:
+
+| `category` | Meaning | Signal key(s) |
+|---|---|---|
+| `absence` | An expected input was not present at all. | `auth.results.missing` |
+| `trust` | An `Authentication-Results` header came from an untrusted authserv-id. | `auth.results.untrusted` |
+| `auth-failure` | An SPF/DKIM/DMARC method returned a failing or error result. | `auth.method.failure` |
+| `consistency` | Two domains that should agree do not. | `messageId.domainMismatch`, `replyTo.domainMismatch`, `returnPath.domainMismatch`, `smtpMailfrom.domainMismatch`, `dkim.domainMismatch`, `dmarc.headerFromMismatch`, `envelopeSender.domainDisagreement` |
+
+Two conventions keep the surface coherent:
+
+- **Keys never overload multiple dimensions.** The failing method and result live
+  in `data` (`{ method: "dmarc", result: "fail", … }`), not in the key, so the
+  whole Authentication-Results failure family shares one enumerable
+  `auth.method.failure` key instead of a combinatorial `auth.<method>.<result>`.
+- **Every consistency signal carries a `mismatchedDomains: string[]`** naming the
+  divergent subset, alongside the reference domain and the observed domain(s), so
+  a caller reads the same field shape across all seven consistency signals.
+
+Malformed or unparseable input is deliberately **not** a category: the rules stay
+silent on it (the relevant match metric is left `null`) rather than emit a
+low-confidence signal, so malformed input surfaces as the *absence* of a signal.
+
 ### Authentication-Results failure signals
 
 `authMethodFailureRule` reports each SPF/DKIM/DMARC method that returned a
-failing or error result (`fail`, `softfail`, `temperror`, `permerror`) as an
-`auth.<method>.<result>` signal. Severity is **trust-aware**, because an
+failing or error result (`fail`, `softfail`, `temperror`, `permerror`) as a
+single `auth.method.failure` signal (category `auth-failure`), with the specific
+`method` and `result` in its `data`. Severity is **trust-aware**, because an
 `Authentication-Results` header can be forged by anyone upstream and is only
 authoritative when stamped by an authserv-id the caller declared in
 `trustedAuthservIds`:
@@ -137,9 +168,11 @@ authoritative when stamped by an authserv-id the caller declared in
 | `softfail` / `temperror` / `permerror` | low | Deliberately non-committal, or a transient/sender-side configuration error. |
 | any of the above from an **untrusted** authserv-id | low | Non-authoritative — the header could be forged. `untrustedAuthservIdRule` flags the source separately. |
 
-Each signal's `data` includes the `authservId`, a `trusted` flag, and the parsed
-method `properties`. The rule emits observations only; thresholds and actions
-stay with the caller.
+Each signal's `data` includes the failing `method` and `result`, the
+`authservId`, a `trusted` flag, and the parsed method `properties`. Callers that
+want to act on a specific method filter on `data.method`/`data.result` rather
+than on the key. The rule emits observations only; thresholds and actions stay
+with the caller.
 
 ### Envelope-sender consistency signals
 

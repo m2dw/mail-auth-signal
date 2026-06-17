@@ -31,14 +31,21 @@ export const returnPathDomainMismatchRule: Rule = {
   description: "The Return-Path domain does not match the From domain.",
   evaluate({ metrics }) {
     if (metrics.returnPathDomainMatchesFromDomain !== false) return [];
+    // The match is false only when both domains resolved and differ, so the
+    // single Return-Path domain is the lone divergent one. Reported as a
+    // mismatchedDomains array too, so every consistency signal carries the same
+    // divergent-domain field shape regardless of how many domains it compares.
+    const mismatchedDomains = metrics.returnPathDomain === null ? [] : [metrics.returnPathDomain];
     return [
       {
         key: "returnPath.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "Return-Path domain differs from the From domain.",
         data: {
           fromDomain: metrics.fromDomain,
           returnPathDomain: metrics.returnPathDomain,
+          mismatchedDomains,
         },
       },
     ];

@@ -48,16 +48,20 @@
     },
     "signals": [
       {
-        "key": "authResults.untrustedAuthservId",
+        "key": "auth.results.untrusted",
+        "category": "trust",
         "severity": "low",
         "message": "Authentication-Results header was produced by an untrusted authserv-id.",
         "data": { "authservId": "mx.example.net" }
       },
       {
-        "key": "auth.dmarc.fail",
+        "key": "auth.method.failure",
+        "category": "auth-failure",
         "severity": "low",
         "message": "DMARC returned fail.",
         "data": {
+          "method": "dmarc",
+          "result": "fail",
           "authservId": "mx.example.net",
           "trusted": false,
           "properties": { "header.from": "example.com" }
@@ -65,9 +69,14 @@
       },
       {
         "key": "messageId.domainMismatch",
+        "category": "consistency",
         "severity": "low",
         "message": "Message-ID domain differs from the From domain.",
-        "data": { "fromDomain": "example.com", "messageIdDomain": "mailer.example.net" }
+        "data": {
+          "fromDomain": "example.com",
+          "messageIdDomain": "mailer.example.net",
+          "mismatchedDomains": ["mailer.example.net"]
+        }
       }
     ]
   }

@@ -41,6 +41,7 @@ export const smtpMailfromDomainMismatchRule: Rule = {
     return [
       {
         key: "smtpMailfrom.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "SPF smtp.mailfrom domain differs from the From domain.",
         data: {

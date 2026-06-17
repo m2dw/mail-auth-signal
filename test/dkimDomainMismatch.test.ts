@@ -28,7 +28,7 @@ function message(from: string | null, dkim: string | null): AnalyzeInput {
   return { headers, options: { trustedAuthservIds: [TRUSTED_ID] } };
 }
 
-/** The dkim.* consistency signals only (drops auth.* and authResults.*). */
+/** The dkim.* consistency signals only (drops the Authentication-Results auth.* family). */
 function dkimSignals(result: AnalyzeResult): Signal[] {
   return result.signals.filter((signal) => signal.key.startsWith("dkim."));
 }
@@ -98,6 +98,7 @@ describe("dkimDomainMismatchRule — mismatched signing domain", () => {
     expect(signals).toEqual([
       {
         key: "dkim.domainMismatch",
+        category: "consistency",
         severity: "low",
         message: "DKIM header.d signing domain differs from the From domain.",
         data: {
@@ -272,7 +273,7 @@ describe("dkimDomainMismatchRule — trust is flagged separately, not folded int
     expect(result.metrics.dkimDomains).toEqual(["evil.test"]);
     expect(result.metrics.dkimDomainMatchesFromDomain).toBe(false);
     expect(dkimSignals(result)).toHaveLength(1);
-    expect(result.signals.map((s) => s.key)).toContain("authResults.untrustedAuthservId");
+    expect(result.signals.map((s) => s.key)).toContain("auth.results.untrusted");
   });
 });
 

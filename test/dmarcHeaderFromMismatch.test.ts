@@ -30,7 +30,7 @@ function message(from: string | null, dmarc: string | null): AnalyzeInput {
   return { headers, options: { trustedAuthservIds: [TRUSTED_ID] } };
 }
 
-/** The dmarc.* consistency signals only (drops auth.* and authResults.*). */
+/** The dmarc.* consistency signals only (drops the Authentication-Results auth.* family). */
 function dmarcSignals(result: AnalyzeResult): Signal[] {
   return result.signals.filter((signal) => signal.key.startsWith("dmarc."));
 }
@@ -94,6 +94,7 @@ describe("dmarcHeaderFromMismatchRule — mismatched header.from", () => {
     expect(signals).toEqual([
       {
         key: "dmarc.headerFromMismatch",
+        category: "consistency",
         severity: "low",
         message: "DMARC header.from domain differs from the visible From domain.",
         data: {
@@ -207,7 +208,7 @@ describe("dmarcHeaderFromMismatchRule — untrusted DMARC context is excluded en
     expect(result.metrics.dmarcHeaderFromDomains).toEqual([]);
     expect(result.metrics.dmarcHeaderFromMatchesFromDomain).toBeNull();
     expect(dmarcSignals(result)).toEqual([]);
-    expect(result.signals.map((s) => s.key)).toContain("authResults.untrustedAuthservId");
+    expect(result.signals.map((s) => s.key)).toContain("auth.results.untrusted");
   });
 
   it("collects only the trusted header when a trusted and an untrusted header disagree", () => {
@@ -324,6 +325,7 @@ describe("dmarcHeaderFromMismatchRule — trust declared at rule time (separated
     expect(dmarc).toEqual([
       {
         key: "dmarc.headerFromMismatch",
+        category: "consistency",
         severity: "low",
         message: "DMARC header.from domain differs from the visible From domain.",
         data: {

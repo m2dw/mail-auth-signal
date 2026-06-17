@@ -45,11 +45,13 @@
     "signals": [
       {
         "key": "returnPath.domainMismatch",
+        "category": "consistency",
         "severity": "low",
         "message": "Return-Path domain differs from the From domain.",
         "data": {
           "fromDomain": "example.com",
-          "returnPathDomain": "evil.test"
+          "returnPathDomain": "evil.test",
+          "mismatchedDomains": ["evil.test"]
         }
       }
     ]
