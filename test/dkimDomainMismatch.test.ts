@@ -62,6 +62,14 @@ describe("extractDkimSigningDomain", () => {
   it("does not pull a domain out of an RFC 5322 comment", () => {
     expect(extractDkimSigningDomain("(evil.test)")).toBeNull();
   });
+
+  it("rejects a comment-derived value with a stray paren the property parser folded in", () => {
+    // `header.d=example.com (header.d=evil.test)` leaves the trailing
+    // `evil.test)` after the property parser overwrites header.d. A stray
+    // closing paren is outside the host charset, so it is rejected rather than
+    // accepted as a signing domain.
+    expect(extractDkimSigningDomain("evil.test)")).toBeNull();
+  });
 });
 
 describe("dkimDomainMismatchRule — aligned DKIM stays silent", () => {
@@ -215,6 +223,19 @@ describe("dkimDomainMismatchRule — missing/malformed input stays silent", () =
 
   it("ignores a dotless header.d (e.g. localhost) rather than reporting a mismatch", () => {
     const result = analyzeMessage(message("Example <a@example.com>", "dkim=pass header.d=localhost"));
+    expect(result.metrics.dkimDomains).toEqual([]);
+    expect(result.metrics.dkimDomainMatchesFromDomain).toBeNull();
+    expect(dkimSignals(result)).toEqual([]);
+  });
+
+  it("does not fabricate a mismatch from a property-shaped comment after an aligned header.d", () => {
+    // The property parser overwrites header.d with the comment's `evil.test)`,
+    // but the trailing paren is outside the host charset, so the comment-derived
+    // value is dropped. The real signing domain aligned with From, so the rule
+    // must stay silent rather than report a spurious dkim.domainMismatch.
+    const result = analyzeMessage(
+      message("Example <a@example.com>", "dkim=pass header.d=example.com (header.d=evil.test)"),
+    );
     expect(result.metrics.dkimDomains).toEqual([]);
     expect(result.metrics.dkimDomainMatchesFromDomain).toBeNull();
     expect(dkimSignals(result)).toEqual([]);

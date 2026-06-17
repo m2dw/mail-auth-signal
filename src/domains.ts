@@ -125,17 +125,23 @@ export function extractEnvelopeSenderDomain(value: string | null): string | null
  * domain with no local part, so this only normalizes and rejects malformed
  * input rather than parsing an addr-spec. Hardening mirrors the other
  * extractors: RFC 5322 comments are stripped first so an attacker domain hidden
- * in a comment cannot be pulled out, and any value carrying an '@', angle
- * bracket, or embedded whitespace is rejected rather than coerced into a
- * fabricated domain that could trigger a spurious consistency signal. The result
- * is normalized (lower-cased, bracket/trailing-dot stripped, dotless hosts
- * rejected) so casing and formatting never produce a false mismatch. Returns
- * null when the value is absent or yields no real dotted domain.
+ * in a comment cannot be pulled out, and any value carrying a character outside
+ * the host charset (letters, digits, dot, hyphen) — an '@', angle bracket,
+ * whitespace, or a stray comment paren — is rejected rather than coerced into a
+ * fabricated domain that could trigger a spurious consistency signal. The
+ * charset check matters because the Authentication-Results property parser can
+ * fold a property-shaped comment into the value (e.g. `header.d=example.com
+ * (header.d=evil.test)` leaves the trailing `evil.test)`), so accepting only
+ * host characters keeps that comment-derived value from masquerading as the
+ * signing domain. The result is normalized (lower-cased, bracket/trailing-dot
+ * stripped, dotless hosts rejected) so casing and formatting never produce a
+ * false mismatch. Returns null when the value is absent or yields no real
+ * dotted domain.
  */
 export function extractDkimSigningDomain(value: string | null): string | null {
   if (!value) return null;
   const candidate = stripComments(value).trim();
-  if (!candidate || /[\s@<>]/.test(candidate)) return null;
+  if (!candidate || !/^[A-Za-z0-9.-]+$/.test(candidate)) return null;
   return normalizeDomain(candidate);
 }
 
