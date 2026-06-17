@@ -1,0 +1,35 @@
+{
+  "description": "From domain and Message-ID domain agree (both example.com) on an otherwise clean, trusted, all-passing message. messageIdDomainMatchesFromDomain is true and no messageId.domainMismatch signal is emitted. Demonstrates the quiet baseline the consistency rule must not disturb.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": []
+  }
+}
