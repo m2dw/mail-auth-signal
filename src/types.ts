@@ -110,6 +110,26 @@ export type MessageMetrics = {
    * signature never reads as a mismatch. false when any signing domain differs.
    */
   dkimDomainMatchesFromDomain: boolean | null;
+  /**
+   * Every resolvable, normalized DMARC `header.from` domain — the visible-From
+   * domain a verifier evaluated — taken only from DMARC results that passed and
+   * only from *trusted* Authentication-Results headers, in encounter order and
+   * deduplicated. Two gates apply because, unlike a DKIM signature, header.from
+   * is not cryptographic: an untrusted (forge-able) header's header.from is just
+   * the attacker's own assertion, and a non-pass DMARC vouches for nothing, so
+   * neither must read as a verified view of the From domain. Empty when no
+   * trusted, passing DMARC result carries a parseable header.from.
+   */
+  dmarcHeaderFromDomains: string[];
+  /**
+   * Whether all dmarcHeaderFromDomains exactly match fromDomain. null when no
+   * comparison was possible (missing From, or no trusted+passing DMARC
+   * header.from), so a failed, missing, malformed, or untrusted DMARC context
+   * never reads as a mismatch. false when a verifier passed DMARC for a From
+   * domain the recipient does not see — a "pass" badge applied to a domain other
+   * than the visible sender.
+   */
+  dmarcHeaderFromMatchesFromDomain: boolean | null;
   authenticationResults: AuthenticationResultsHeader[];
 };
 

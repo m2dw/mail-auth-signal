@@ -189,6 +189,32 @@ single divergent signing domain among several is enough to flag (the
 `From`, no passing DKIM result, or an unparseable `header.d` leaves
 `dkimDomainMatchesFromDomain` `null` and emits no signal.
 
+### DMARC header.from consistency signal
+
+`dmarcHeaderFromMismatchRule` compares the DMARC `header.from` domain — the
+receiver's own parse of the visible `From` domain, the domain a DMARC `pass`
+actually vouches for — against the `From` domain this library parses.
+
+| Signal | Compares | Attacker pattern | Common false positive |
+|---|---|---|---|
+| `dmarc.headerFromMismatch` | DMARC `header.from` vs From | A crafted, ambiguous From header (e.g. two From headers or encoded-word tricks) is resolved to one domain by the verifier and another by the recipient's client, so a DMARC `pass` badge ends up displayed against a From the user never sees. | Exact comparison with no PSL/org-domain logic, so a benign subdomain difference, or a verifier that records the organizational domain, also reads as a mismatch. |
+
+**Pass and trust gated.** The `dmarcHeaderFromDomains` metric is populated only
+from DMARC results that returned `pass` *and* only from **trusted**
+`Authentication-Results` headers. Two gates apply because, unlike a DKIM
+signature, `header.from` is not cryptographic: a non-`pass` DMARC vouches for
+nothing (and `authMethodFailureRule` already surfaces the failure), while a
+forge-able untrusted header's `header.from` is just the attacker's own assertion,
+so neither must read as a verified view of the From domain. This is what keeps a
+failed, missing, malformed, or untrusted DMARC context from producing a noisy
+consistency signal.
+
+Like the other consistency hints this is **low** severity, never a verdict. A
+single trusted+passing `header.from` that differs from From is enough to flag
+(the `mismatchedDomains` subset is reported). Missing context stays silent: a
+missing `From`, no trusted+passing DMARC result, or an unparseable `header.from`
+leaves `dmarcHeaderFromMatchesFromDomain` `null` and emits no signal.
+
 ## Current status
 
 This repository is in early development. Implemented so far:
@@ -201,6 +227,7 @@ This repository is in early development. Implemented so far:
 - Message-ID domain comparison
 - Envelope-sender consistency (Return-Path and SPF `smtp.mailfrom` vs From, and the two against each other)
 - DKIM signing-domain consistency (passing `header.d` vs From)
+- DMARC From-domain consistency (trusted, passing `header.from` vs the visible From)
 
 The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 

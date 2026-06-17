@@ -2,6 +2,7 @@ import {
   allDomainsMatch,
   domainsExactlyMatch,
   extractDkimSigningDomain,
+  extractDmarcHeaderFromDomain,
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
@@ -10,7 +11,41 @@ import {
 } from "./domains.js";
 import { getFirstHeaderValue, getHeaderValues, normalizeHeaders } from "./normalizeHeaders.js";
 import { parseAuthenticationResults } from "./parseAuthenticationResults.js";
-import type { AnalyzeInput, MessageMetrics } from "./types.js";
+import type { AnalyzeInput, AuthenticationResultsHeader, MessageMetrics } from "./types.js";
+
+/**
+ * Collect the resolvable, normalized DMARC `header.from` domains across the given
+ * Authentication-Results headers, in encounter order and deduplicated.
+ *
+ * Two gates apply, both expressed here so metric extraction and rule evaluation
+ * collect the same set the same way:
+ *
+ *   - Pass only: a non-pass DMARC vouches for nothing, so its header.from is
+ *     never treated as a verified From view (neither a false alignment nor a
+ *     fabricated mismatch); a failed DMARC is already surfaced elsewhere.
+ *   - Trusted only: header.from is not cryptographic, so a forge-able untrusted
+ *     header's value is just the attacker's own assertion. Trust is supplied by
+ *     the caller via `isTrusted` rather than read from the baked header.trusted
+ *     flag, so a rule can recompute trust at evaluation time (e.g. when trust is
+ *     declared to runRules after metrics were extracted without it).
+ */
+export function collectDmarcHeaderFromDomains(
+  headers: readonly AuthenticationResultsHeader[],
+  isTrusted: (header: AuthenticationResultsHeader) => boolean,
+): string[] {
+  return [
+    ...new Set(
+      headers
+        .filter(isTrusted)
+        .flatMap((header) =>
+          header.methods
+            .filter((method) => method.method === "dmarc" && method.result === "pass")
+            .map((method) => extractDmarcHeaderFromDomain(method.properties["header.from"] ?? null))
+            .filter((domain): domain is string => domain !== null),
+        ),
+    ),
+  ];
+}
 
 /**
  * Extract serializable facts from a message, with no interpretation applied.
@@ -85,6 +120,19 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
   ];
   const dkimDomainMatchesFromDomain = allDomainsMatch(fromDomain, dkimDomains);
 
+  // header.from is the visible-From domain a DMARC verifier evaluated. Collect it
+  // from every trusted, passing DMARC result across all headers (see
+  // collectDmarcHeaderFromDomains for the pass/trust gates). Trust here uses the
+  // baked header.trusted flag — the trust resolved when these metrics were
+  // extracted — so analyzeMessage's snapshot stays stable. The dmarc.headerFrom
+  // mismatch rule recomputes trust at rule time so callers using the separated
+  // API can declare trust to runRules after extracting metrics without it.
+  const dmarcHeaderFromDomains = collectDmarcHeaderFromDomains(
+    authenticationResults,
+    (header) => header.trusted,
+  );
+  const dmarcHeaderFromMatchesFromDomain = allDomainsMatch(fromDomain, dmarcHeaderFromDomains);
+
   return {
     fromDomain,
     messageIdDomain,
@@ -99,6 +147,8 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     envelopeSenderDomainsAgree,
     dkimDomains,
     dkimDomainMatchesFromDomain,
+    dmarcHeaderFromDomains,
+    dmarcHeaderFromMatchesFromDomain,
     authenticationResults,
   };
 }
