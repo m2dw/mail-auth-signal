@@ -49,7 +49,24 @@ console.log(result.signals);
 
 ## API boundary
 
-`analyzeMessage(input: AnalyzeInput): AnalyzeResult` is the single public analysis entry point.
+`analyzeMessage(input: AnalyzeInput, rules?: readonly Rule[]): AnalyzeResult` is the
+primary public analysis entry point. Internally it runs in two separable halves
+so detection rules can be migrated incrementally:
+
+```ts
+import { extractMetrics, runRules, defaultRules, analyzeMessage } from "mail-auth-signal";
+
+// analyzeMessage(input) is equivalent to:
+const metrics = extractMetrics(input);          // parsing + facts, no interpretation
+const signals = runRules(metrics, input.options, defaultRules); // interpretation only
+```
+
+- `extractMetrics(input)` — pure parsing/metric extraction. Returns serializable
+  facts (`MessageMetrics`) with no signals attached.
+- `runRules(metrics, options?, rules?)` — evaluates a rule set over already-extracted
+  metrics. Lets callers cache or transport metrics and evaluate rules separately.
+- `defaultRules` — the built-in rule set. Callers pass their own array (a subset of
+  `defaultRules`, or custom `Rule`s) as the second argument to `analyzeMessage`.
 
 **What belongs in this library (core)**
 
@@ -74,6 +91,35 @@ The core is pure: it reads no globals, no environment variables, and performs no
 
 - `trustedAuthservIds` — the authserv-ids the caller's mail system stamps on inbound mail. The caller is responsible for this list; the core has no built-in opinion.
 - `context` — an open-ended serializable bag for future caller-provided policy context (per-sender overrides, allow-listed domains, metadata). Currently ignored by all rules; reserved for rule migration from the Thunderbird add-on.
+
+## Writing a rule
+
+A `Rule` is the unit of incremental migration. Each detection rule is a pure
+function of a `RuleContext` (`{ metrics, options }`) that returns zero or more
+`Signal`s — never a score or an allow/block decision. A rule that needs a new
+fact adds it to metric extraction rather than re-parsing headers, keeping
+parsing, metric extraction, and rule evaluation separable.
+
+```ts
+import { analyzeMessage, defaultRules } from "mail-auth-signal";
+import type { Rule } from "mail-auth-signal";
+
+const fromDomainMissingRule: Rule = {
+  key: "from.domainMissing",
+  description: "The From header had no parseable domain.",
+  evaluate({ metrics }) {
+    if (metrics.fromDomain) return [];
+    return [{ key: "from.domainMissing", severity: "low", message: "No From domain." }];
+  },
+};
+
+// Run the built-ins plus your rule:
+const result = analyzeMessage(input, [...defaultRules, fromDomainMissingRule]);
+```
+
+`test/fixtures/dmarc-fail.json` is a JSON fixture (input + expected
+`AnalyzeResult`) that pins the serializable output shape for tests and
+cross-language ports.
 
 ## Current status
 

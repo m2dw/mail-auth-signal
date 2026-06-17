@@ -98,3 +98,51 @@ export type AnalyzeResult = {
   metrics: MessageMetrics;
   signals: Signal[];
 };
+
+/**
+ * Read-only input handed to every Rule.
+ *
+ * Rules evaluate already-extracted facts; they never re-parse headers or reach
+ * for external state. Everything a rule may legitimately read arrives here:
+ *
+ *   - metrics: facts produced by extractMetrics, with no interpretation applied.
+ *   - options: the caller-provided context (trustedAuthservIds and the
+ *     open-ended `context` bag). Rules read policy context from here.
+ *
+ * This is the stable contract that follow-up rule-migration issues target. A
+ * rule that needs a new fact should add it to MessageMetrics (via metric
+ * extraction) rather than parsing headers itself, keeping parsing, metric
+ * extraction, and rule evaluation separable.
+ */
+export type RuleContext = {
+  readonly metrics: MessageMetrics;
+  readonly options: AnalyzeOptions;
+};
+
+/**
+ * A single detection rule.
+ *
+ * Rules are the unit of incremental migration: each rule from the Thunderbird
+ * add-on becomes one Rule with its own key, tests, and fixtures. Rules are
+ * pure functions of RuleContext — given the same context they must return the
+ * same signals, with no I/O, globals, or randomness.
+ *
+ * A Rule is code, not data, so it travels as a separate argument to
+ * analyzeMessage and never inside the JSON-serializable AnalyzeInput.
+ *
+ * Boundary contract:
+ *   - evaluate returns zero or more Signals describing observations only.
+ *   - A rule must not emit an allow/block/move/notify decision or a numeric
+ *     score; thresholds and policy belong to the caller.
+ */
+export type Rule = {
+  /**
+   * Stable identifier for the rule. Distinct from the signal `key`s it emits;
+   * lets callers select, disable, or document individual rules.
+   */
+  key: string;
+  /** Optional human-readable description of what the rule detects. */
+  description?: string;
+  /** Derive zero or more signals from already-extracted facts. */
+  evaluate(context: RuleContext): Signal[];
+};
