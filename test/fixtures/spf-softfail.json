@@ -1,0 +1,48 @@
+{
+  "description": "SPF softfail from a trusted authserv-id. A softfail (the domain's `~all`) is deliberately non-committal and is a common artifact of legitimate forwarding, so even from a trusted source it is reported low — the false-positive mitigation for forwarded mail.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; spf=softfail smtp.mailfrom=fwd.example.org"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; spf=softfail smtp.mailfrom=fwd.example.org",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            {
+              "method": "spf",
+              "result": "softfail",
+              "properties": { "smtp.mailfrom": "fwd.example.org" }
+            }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "auth.spf.softfail",
+        "severity": "low",
+        "message": "SPF returned softfail.",
+        "data": {
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "properties": { "smtp.mailfrom": "fwd.example.org" }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "description": "DKIM fail from a trusted authserv-id. A DKIM hard fail is authoritative here and reported medium (not high): mailing lists and forwarders that rewrite the body or headers routinely break a single DKIM signature for legitimate mail, so it is a strong hint rather than a spoofing verdict.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; dkim=fail header.d=example.com header.s=sel1"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dkim=fail header.d=example.com header.s=sel1",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            {
+              "method": "dkim",
+              "result": "fail",
+              "properties": { "header.d": "example.com", "header.s": "sel1" }
+            }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "auth.dkim.fail",
+        "severity": "medium",
+        "message": "DKIM returned fail.",
+        "data": {
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "properties": { "header.d": "example.com", "header.s": "sel1" }
+        }
+      }
+    ]
+  }
+}
