@@ -1,6 +1,6 @@
 {
   "name": "mail-auth-signal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A lightweight sender-risk signal engine for email authentication results and header consistency analysis.",
   "license": "Apache-2.0",
   "author": "m2dw",
@@ -58,4 +58,3 @@
     "mail-security"
   ]
 }
-
