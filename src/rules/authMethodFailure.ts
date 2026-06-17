@@ -13,6 +13,7 @@ const FAILURE_RESULTS = ["fail", "softfail", "temperror", "permerror"];
  */
 export const authMethodFailureRule: Rule = {
   key: "auth.methodFailure",
+  scope: "header",
   description: "An authentication method returned a failing or error result.",
   evaluate({ metrics }) {
     const signals: Signal[] = [];

@@ -10,18 +10,26 @@ import type { Rule } from "../types.js";
  * This rule only reports the mismatch; the caller's trustedAuthservIds list is
  * the sole source of truth for which ids are believed.
  *
- * Trust is recomputed here from options.trustedAuthservIds rather than read from
- * the metrics' baked-in header.trusted flag, so callers using the separated API
- * (extract metrics once, then runRules with caller policy) get rules that honor
- * the trustedAuthservIds they pass to runRules — per the RuleContext contract.
+ * Trust resolution honors the RuleContext contract without diverging from
+ * analyzeMessage: when the caller passes trustedAuthservIds to runRules, trust
+ * is recomputed from that list (callers using the separated API can declare
+ * trust at rule time). When trustedAuthservIds is omitted, the metrics' baked-in
+ * header.trusted flag is used instead, so runRules(extractMetrics(input)) with
+ * no second argument reports the same trust analyzeMessage(input) did rather
+ * than treating every already-trusted header as untrusted.
  */
 export const untrustedAuthservIdRule: Rule = {
   key: "authResults.untrustedAuthservId",
+  scope: "header",
   description: "An Authentication-Results header came from an untrusted authserv-id.",
   evaluate({ metrics, options }) {
-    const trustedAuthservIds = options.trustedAuthservIds ?? [];
+    const overrideTrustedIds = options.trustedAuthservIds;
     return metrics.authenticationResults
-      .filter((header) => !isTrustedAuthservId(header.authservId, trustedAuthservIds))
+      .filter((header) =>
+        overrideTrustedIds === undefined
+          ? !header.trusted
+          : !isTrustedAuthservId(header.authservId, overrideTrustedIds),
+      )
       .map((header) => ({
         key: "authResults.untrustedAuthservId",
         severity: "low" as const,

@@ -120,6 +120,11 @@ export type RuleContext = {
 };
 
 /**
+ * Evaluation granularity for a Rule (see Rule.scope). Defaults to "message".
+ */
+export type RuleScope = "message" | "header";
+
+/**
  * A single detection rule.
  *
  * Rules are the unit of incremental migration: each rule from the Thunderbird
@@ -141,6 +146,18 @@ export type Rule = {
    * lets callers select, disable, or document individual rules.
    */
   key: string;
+  /**
+   * Evaluation granularity, defaulting to "message".
+   *
+   * - "message": evaluate once against the whole metrics object.
+   * - "header": evaluate once per Authentication-Results header, with
+   *   metrics.authenticationResults narrowed to that single header. runRules
+   *   evaluates a consecutive run of header-scoped rules header-by-header, so
+   *   each header's signals stay grouped together (the order a single
+   *   per-header loop produces) instead of being grouped per rule. Rules that
+   *   read no per-header facts can ignore this and stay "message"-scoped.
+   */
+  scope?: RuleScope;
   /** Optional human-readable description of what the rule detects. */
   description?: string;
   /** Derive zero or more signals from already-extracted facts. */

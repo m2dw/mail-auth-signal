@@ -22,6 +22,7 @@ export type {
   MessageMetrics,
   Rule,
   RuleContext,
+  RuleScope,
   Signal,
   SignalSeverity,
 } from "./types.js";

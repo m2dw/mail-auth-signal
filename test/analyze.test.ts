@@ -115,6 +115,52 @@ describe("analysis API boundary", () => {
     );
   });
 
+  it("preserves trust from metrics when runRules options are omitted", () => {
+    // Caller extracts metrics WITH trust context, then uses the separated API
+    // as runRules(metrics) without re-passing options. The baked-in
+    // header.trusted must still be honored so this matches analyzeMessage and
+    // does not report the already-trusted header as untrusted.
+    const metrics = extractMetrics(dmarcFailInput);
+    expect(metrics.authenticationResults[0]?.trusted).toBe(true);
+
+    const separated = runRules(metrics);
+    const viaAnalyze = analyzeMessage(dmarcFailInput).signals;
+
+    expect(separated.map((signal) => signal.key)).not.toContain(
+      "authResults.untrustedAuthservId",
+    );
+    expect(separated).toEqual(viaAnalyze);
+  });
+
+  it("keeps per-header signal ordering for multiple Authentication-Results", () => {
+    // A trusted first header that fails SPF and an untrusted second header that
+    // fails DKIM. The first header's failure must precede the second header's
+    // untrusted signal, rather than all untrusted signals being grouped first.
+    const input = {
+      headers: {
+        from: "Example Sender <notice@example.com>",
+        "message-id": "<abc123@example.com>",
+        "authentication-results": [
+          "mx.example.net; spf=fail smtp.mailfrom=example.com",
+          "relay.evil.test; dkim=fail header.d=example.com",
+        ],
+      },
+      options: { trustedAuthservIds: ["mx.example.net"] },
+    };
+
+    const fromAnalyze = analyzeMessage(input).signals.map((signal) => signal.key);
+    const fromRunRules = runRules(extractMetrics(input), input.options).map(
+      (signal) => signal.key,
+    );
+
+    expect(fromAnalyze).toEqual([
+      "auth.spf.fail",
+      "authResults.untrustedAuthservId",
+      "auth.dkim.fail",
+    ]);
+    expect(fromRunRules).toEqual(fromAnalyze);
+  });
+
   it("lets callers target a narrowed rule set", () => {
     const onlyDomainMismatch = defaultRules.filter(
       (rule) => rule.key === "messageId.domainMismatch",
