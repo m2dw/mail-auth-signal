@@ -171,6 +171,33 @@ describe("replyToDomainMismatchRule — malformed input avoids noisy signals", (
     // fragment that still resolves to the real domain.
     expect(extractDomainsFromMailboxList('"Doe, John" <john@example.com>')).toEqual(["example.com"]);
   });
+
+  it("does not extract an email-like fragment from a quoted display name with a comma", () => {
+    // The quoted display name embeds both an email-like string and a comma. A
+    // naive comma split would yield a `"billing@evil.test` fragment that
+    // resolves to evil.test, fabricating a mismatch even though the only real
+    // reply target is alice@example.com.
+    expect(
+      extractDomainsFromMailboxList('"billing@evil.test, Alice" <alice@example.com>'),
+    ).toEqual(["example.com"]);
+  });
+
+  it("emits no mismatch signal for a quoted-comma display name that hides an email", () => {
+    const result = analyzeMessage(
+      message("Example <a@example.com>", '"billing@evil.test, Alice" <alice@example.com>'),
+    );
+    expect(result.metrics.replyToDomains).toEqual(["example.com"]);
+    expect(result.metrics.replyToDomainMatchesFromDomain).toBe(true);
+    expect(replyToSignals(result)).toEqual([]);
+  });
+
+  it("honors a backslash-escaped quote inside a display name", () => {
+    // The escaped quote must not close the quoted string early, so the embedded
+    // comma stays inside the display name and no bogus domain is extracted.
+    expect(
+      extractDomainsFromMailboxList('"a\\" b@evil.test, c" <real@example.com>'),
+    ).toEqual(["example.com"]);
+  });
 });
 
 describe("replyToDomainMismatchRule — rule in isolation", () => {

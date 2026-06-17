@@ -27,22 +27,68 @@ export function domainsExactlyMatch(left: string | null, right: string | null): 
  * Extract every resolvable domain from a mailbox-list value (RFC 5322
  * mailbox-list, the syntax of headers like Reply-To and To).
  *
- * The list is split on commas — the mailbox separator — and each fragment is
- * run through the hardened single-mailbox extractor. Fragments with no
- * parseable address (e.g. the leading half of a quoted display name that itself
- * contains a comma, like `"Doe, John" <john@example.com>`) simply yield no
- * domain and are dropped, so a comma inside a display name cannot fabricate a
- * bogus domain. Duplicates are intentionally kept; callers dedupe if they want
- * a set. Returns an empty array when the value is absent or yields no domain.
+ * The list is split on the mailbox separator comma, but commas inside a
+ * quoted string (`"..."`) or an angle-addr (`<...>`) are not separators and
+ * must not split the list. Without this, a display name that contains both an
+ * email-like fragment and a comma — e.g. `"billing@evil.test, Alice"
+ * <alice@example.com>` — would be split into `"billing@evil.test` and
+ * ` Alice" <alice@example.com>`, and the hardened single-mailbox extractor
+ * would pull `evil.test` out of the display-name fragment, fabricating a bogus
+ * mismatch domain even though the only real reply target is alice@example.com.
+ *
+ * Each top-level fragment is then run through the hardened single-mailbox
+ * extractor. Fragments with no parseable address simply yield no domain and are
+ * dropped. Duplicates are intentionally kept; callers dedupe if they want a
+ * set. Returns an empty array when the value is absent or yields no domain.
  */
 export function extractDomainsFromMailboxList(value: string | null): string[] {
   if (!value) return [];
   const domains: string[] = [];
-  for (const part of value.split(",")) {
+  for (const part of splitMailboxList(value)) {
     const domain = extractDomainFromMailbox(part);
     if (domain) domains.push(domain);
   }
   return domains;
+}
+
+/**
+ * Split a mailbox-list on top-level commas only, treating commas inside a
+ * quoted string or an angle-addr as ordinary characters. Backslash escapes
+ * inside a quoted string are honored so an escaped quote does not prematurely
+ * close the string.
+ */
+function splitMailboxList(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let inAngle = false;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (inQuotes) {
+      if (char === "\\" && i + 1 < value.length) {
+        current += char + value[++i];
+        continue;
+      }
+      if (char === '"') inQuotes = false;
+      current += char;
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = true;
+      current += char;
+      continue;
+    }
+    if (char === "<") inAngle = true;
+    else if (char === ">") inAngle = false;
+    if (char === "," && !inAngle) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts;
 }
 
 /**
