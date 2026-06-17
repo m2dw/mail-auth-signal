@@ -134,12 +134,15 @@ extra care:
 
   ```sh
   npm run release:check     # typecheck + test + build + pack --dry-run
-  npm publish --access public --provenance
+  npm publish --access public
   ```
 
-  `npm publish` will prompt for 2FA. After this initial publish succeeds,
-  configure trusted publishing and use the tag-driven workflow for later
-  releases.
+  Do **not** pass `--provenance` here: provenance generation only works in a
+  supported CI/OIDC environment (such as the `Release` workflow), not from a
+  local checkout, so it would make this manual publish fail. `npm publish` will
+  prompt for 2FA. After this initial publish succeeds, configure trusted
+  publishing and use the tag-driven workflow — which publishes with provenance —
+  for later releases.
 
 - **Do not commit npm credentials.** Never add an `NPM_TOKEN` to the repository
   in plaintext or to any committed file; use GitHub Actions secrets or trusted
