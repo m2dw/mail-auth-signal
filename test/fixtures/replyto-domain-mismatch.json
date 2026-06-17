@@ -1,9 +1,10 @@
 {
-  "description": "From domain (example.com) differs from the Message-ID domain (mailer.example.net) on an otherwise clean, trusted, all-passing message, isolating the consistency rule. messageIdDomainMatchesFromDomain is false and a single low-severity messageId.domainMismatch signal is emitted carrying both normalized domains. Low severity reflects that this mismatch is also common for legitimate ESPs/forwarders.",
+  "description": "Reply-chain fraud shape: From shows example.com but Reply-To steers replies to attacker-controlled evil.test on an otherwise clean, trusted, all-passing message, isolating the consistency rule. replyToDomainMatchesFromDomain is false and a single low-severity replyTo.domainMismatch signal is emitted carrying the From domain, all Reply-To domains, and the mismatching subset. Low severity reflects that a divergent Reply-To is also common for legitimate support/list mail.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
-      "message-id": "<abc123@mailer.example.net>",
+      "reply-to": "Billing <billing@evil.test>",
+      "message-id": "<abc123@example.com>",
       "authentication-results": [
         "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
       ]
@@ -15,10 +16,10 @@
   "expected": {
     "metrics": {
       "fromDomain": "example.com",
-      "messageIdDomain": "mailer.example.net",
-      "messageIdDomainMatchesFromDomain": false,
-      "replyToDomains": [],
-      "replyToDomainMatchesFromDomain": null,
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": ["evil.test"],
+      "replyToDomainMatchesFromDomain": false,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
@@ -34,10 +35,14 @@
     },
     "signals": [
       {
-        "key": "messageId.domainMismatch",
+        "key": "replyTo.domainMismatch",
         "severity": "low",
-        "message": "Message-ID domain differs from the From domain.",
-        "data": { "fromDomain": "example.com", "messageIdDomain": "mailer.example.net" }
+        "message": "Reply-To domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "replyToDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
       }
     ]
   }

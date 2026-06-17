@@ -43,6 +43,18 @@ export type MessageMetrics = {
   fromDomain: string | null;
   messageIdDomain: string | null;
   messageIdDomainMatchesFromDomain: boolean | null;
+  /**
+   * Every resolvable, normalized domain parsed from the Reply-To header(s), in
+   * encounter order and deduplicated. Empty when Reply-To is absent or no
+   * mailbox in it yields a real dotted domain.
+   */
+  replyToDomains: string[];
+  /**
+   * Whether all replyToDomains exactly match fromDomain. null when no
+   * comparison was possible (missing From, or no Reply-To domain), so a missing
+   * Reply-To never reads as a mismatch. false when any Reply-To domain differs.
+   */
+  replyToDomainMatchesFromDomain: boolean | null;
   authenticationResults: AuthenticationResultsHeader[];
 };
 
