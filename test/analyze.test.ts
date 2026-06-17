@@ -96,6 +96,25 @@ describe("analysis API boundary", () => {
     ]);
   });
 
+  it("honors trustedAuthservIds passed to runRules, not the baked-in metric", () => {
+    // Caller uses the separated API: extract metrics WITHOUT trust context, then
+    // declare the authserv-id trusted only when running rules. The untrusted
+    // signal must reflect the options handed to runRules, not header.trusted.
+    const metrics = extractMetrics({ headers: dmarcFailInput.headers });
+
+    expect(metrics.authenticationResults[0]?.trusted).toBe(false);
+
+    const trustedSignals = runRules(metrics, { trustedAuthservIds: ["mx.example.net"] });
+    expect(trustedSignals.map((signal) => signal.key)).not.toContain(
+      "authResults.untrustedAuthservId",
+    );
+
+    const untrustedSignals = runRules(metrics, {});
+    expect(untrustedSignals.map((signal) => signal.key)).toContain(
+      "authResults.untrustedAuthservId",
+    );
+  });
+
   it("lets callers target a narrowed rule set", () => {
     const onlyDomainMismatch = defaultRules.filter(
       (rule) => rule.key === "messageId.domainMismatch",
