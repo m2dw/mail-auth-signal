@@ -46,10 +46,13 @@
     },
     "signals": [
       {
-        "key": "auth.dkim.fail",
+        "key": "auth.method.failure",
+        "category": "auth-failure",
         "severity": "medium",
         "message": "DKIM returned fail.",
         "data": {
+          "method": "dkim",
+          "result": "fail",
           "authservId": "mx.example.net",
           "trusted": true,
           "properties": { "header.d": "example.com", "header.s": "sel1" }

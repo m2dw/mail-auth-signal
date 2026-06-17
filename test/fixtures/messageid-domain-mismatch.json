@@ -45,9 +45,14 @@
     "signals": [
       {
         "key": "messageId.domainMismatch",
+        "category": "consistency",
         "severity": "low",
         "message": "Message-ID domain differs from the From domain.",
-        "data": { "fromDomain": "example.com", "messageIdDomain": "mailer.example.net" }
+        "data": {
+          "fromDomain": "example.com",
+          "messageIdDomain": "mailer.example.net",
+          "mismatchedDomains": ["mailer.example.net"]
+        }
       }
     ]
   }

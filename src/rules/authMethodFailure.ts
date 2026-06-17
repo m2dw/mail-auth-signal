@@ -77,10 +77,20 @@ export const authMethodFailureRule: Rule = {
       for (const method of header.methods) {
         if (!FAILURE_RESULTS.has(method.result)) continue;
         signals.push({
-          key: `auth.${method.method}.${method.result}`,
+          // One stable key for the whole family; the failing method and result
+          // travel in `data` rather than being overloaded into the key string,
+          // so callers enumerate a fixed key and filter on data.method/result.
+          key: "auth.method.failure",
+          category: "auth-failure",
           severity: severityFor(method.method, method.result, trusted),
           message: `${method.method.toUpperCase()} returned ${method.result}.`,
-          data: { authservId: header.authservId, trusted, properties: method.properties },
+          data: {
+            method: method.method,
+            result: method.result,
+            authservId: header.authservId,
+            trusted,
+            properties: method.properties,
+          },
         });
       }
     }

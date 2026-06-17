@@ -9,13 +9,14 @@ import type { Rule } from "../types.js";
  * the caller decides whether absence matters for its trust model.
  */
 export const missingAuthResultsRule: Rule = {
-  key: "authResults.missing",
+  key: "auth.results.missing",
   description: "No Authentication-Results header was present on the message.",
   evaluate({ metrics }) {
     if (metrics.authenticationResults.length > 0) return [];
     return [
       {
-        key: "authResults.missing",
+        key: "auth.results.missing",
+        category: "absence",
         severity: "medium",
         message: "No Authentication-Results header was found.",
       },

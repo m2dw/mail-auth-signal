@@ -27,7 +27,7 @@ function message(from: string | null, messageId: string | null): AnalyzeInput {
   return { headers, options: { trustedAuthservIds: [TRUSTED_ID] } };
 }
 
-/** The messageId.* consistency signals only (drops auth.* and authResults.*). */
+/** The messageId.* consistency signals only (drops the Authentication-Results auth.* family). */
 function mismatchSignals(result: AnalyzeResult): Signal[] {
   return result.signals.filter((signal) => signal.key.startsWith("messageId."));
 }
@@ -66,9 +66,14 @@ describe("messageIdDomainMismatchRule — mismatched domains", () => {
     expect(signals).toHaveLength(1);
     expect(signals[0]).toEqual({
       key: "messageId.domainMismatch",
+      category: "consistency",
       severity: "low",
       message: "Message-ID domain differs from the From domain.",
-      data: { fromDomain: "example.com", messageIdDomain: "mailer.example.net" },
+      data: {
+        fromDomain: "example.com",
+        messageIdDomain: "mailer.example.net",
+        mismatchedDomains: ["mailer.example.net"],
+      },
     });
   });
 

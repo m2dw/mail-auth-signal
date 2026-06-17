@@ -31,18 +31,23 @@ export const envelopeSenderDisagreementRule: Rule = {
   description: "The Return-Path domain and an SPF smtp.mailfrom domain disagree.",
   evaluate({ metrics }) {
     if (metrics.envelopeSenderDomainsAgree !== false) return [];
-    const disagreeingDomains = metrics.smtpMailfromDomains.filter(
+    // The smtp.mailfrom domains that diverge from the Return-Path. Named
+    // mismatchedDomains (not disagreeingDomains) so every consistency signal
+    // exposes the same divergent-domain field, even though here the reference
+    // domain is the Return-Path rather than From.
+    const mismatchedDomains = metrics.smtpMailfromDomains.filter(
       (domain) => domain !== metrics.returnPathDomain,
     );
     return [
       {
         key: "envelopeSender.domainDisagreement",
+        category: "consistency",
         severity: "low",
         message: "Return-Path domain differs from the SPF smtp.mailfrom domain.",
         data: {
           returnPathDomain: metrics.returnPathDomain,
           smtpMailfromDomains: metrics.smtpMailfromDomains,
-          disagreeingDomains,
+          mismatchedDomains,
         },
       },
     ];

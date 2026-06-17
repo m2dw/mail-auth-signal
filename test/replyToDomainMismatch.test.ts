@@ -29,7 +29,7 @@ function message(from: string | null, replyTo: string | string[] | null): Analyz
   return { headers, options: { trustedAuthservIds: [TRUSTED_ID] } };
 }
 
-/** The replyTo.* consistency signals only (drops auth.* and authResults.*). */
+/** The replyTo.* consistency signals only (drops the Authentication-Results auth.* family). */
 function replyToSignals(result: AnalyzeResult): Signal[] {
   return result.signals.filter((signal) => signal.key.startsWith("replyTo."));
 }
@@ -79,6 +79,7 @@ describe("replyToDomainMismatchRule — mismatched domains", () => {
     expect(signals).toHaveLength(1);
     expect(signals[0]).toEqual({
       key: "replyTo.domainMismatch",
+      category: "consistency",
       severity: "low",
       message: "Reply-To domain differs from the From domain.",
       data: {

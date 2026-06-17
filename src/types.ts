@@ -22,14 +22,46 @@ export type AuthenticationResultsHeader = {
 export type SignalSeverity = "info" | "low" | "medium" | "high";
 
 /**
+ * Coarse classification shared by every built-in signal, so callers can group,
+ * route, or filter signals by what kind of observation they are without
+ * string-matching individual keys.
+ *
+ *   - "absence":      an expected input was simply not present (e.g. no
+ *                     Authentication-Results header at all). Distinct from a
+ *                     malformed or a failing input.
+ *   - "trust":        an Authentication-Results header came from a source the
+ *                     caller did not declare trusted, so its claims are not
+ *                     authoritative on their own.
+ *   - "auth-failure": an authentication method (SPF/DKIM/DMARC/…) returned a
+ *                     failing or error result.
+ *   - "consistency":  two header-derived domains that should agree do not — a
+ *                     domain-consistency mismatch.
+ *
+ * Malformed input is deliberately not a category: the rules stay silent on
+ * unparseable input rather than emit a low-confidence signal, so malformed
+ * input surfaces as the absence of a signal, never as a category of one. This
+ * keeps the four distinctions the surface must draw — absence, malformed,
+ * auth failure, and consistency mismatch — from collapsing into one key shape.
+ */
+export type SignalCategory = "absence" | "trust" | "auth-failure" | "consistency";
+
+/**
  * A keyed, severity-tagged observation produced by the core.
  *
  * Callers are responsible for deciding what to do with signals — thresholds,
  * UI presentation, notifications, mailbox actions, and allow/block policy all
  * belong outside this library.
+ *
+ * `category` is the coarse classification of the observation (see
+ * SignalCategory). Every built-in rule sets it; it is optional only so a
+ * caller-supplied custom rule may omit it. `key` stays the stable, fine-grained
+ * identifier and never overloads multiple dimensions into its string — variable
+ * specifics (the failing method, the divergent domains) live in `data`, not in
+ * the key.
  */
 export type Signal = {
   key: string;
+  category?: SignalCategory;
   severity: SignalSeverity;
   message: string;
   data?: Record<string, unknown>;

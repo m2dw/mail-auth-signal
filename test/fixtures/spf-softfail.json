@@ -46,10 +46,13 @@
     },
     "signals": [
       {
-        "key": "auth.spf.softfail",
+        "key": "auth.method.failure",
+        "category": "auth-failure",
         "severity": "low",
         "message": "SPF returned softfail.",
         "data": {
+          "method": "spf",
+          "result": "softfail",
           "authservId": "mx.example.net",
           "trusted": true,
           "properties": { "smtp.mailfrom": "fwd.example.org" }
@@ -57,6 +60,7 @@
       },
       {
         "key": "smtpMailfrom.domainMismatch",
+        "category": "consistency",
         "severity": "low",
         "message": "SPF smtp.mailfrom domain differs from the From domain.",
         "data": {

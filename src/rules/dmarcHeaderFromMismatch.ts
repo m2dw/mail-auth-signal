@@ -64,6 +64,7 @@ export const dmarcHeaderFromMismatchRule: Rule = {
     return [
       {
         key: "dmarc.headerFromMismatch",
+        category: "consistency",
         severity: "low",
         message: "DMARC header.from domain differs from the visible From domain.",
         data: {

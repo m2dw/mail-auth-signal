@@ -38,5 +38,6 @@ export type {
   RuleContext,
   RuleScope,
   Signal,
+  SignalCategory,
   SignalSeverity,
 } from "./types.js";
