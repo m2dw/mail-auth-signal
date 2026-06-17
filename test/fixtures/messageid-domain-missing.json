@@ -1,0 +1,34 @@
+{
+  "description": "No Message-ID header is present on an otherwise clean, trusted, all-passing message. messageIdDomain is null and messageIdDomainMatchesFromDomain is null, so the consistency comparison is skipped and no messageId.domainMismatch signal is emitted. Confirms missing input stays silent rather than producing a noisy low-confidence signal.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": null,
+      "messageIdDomainMatchesFromDomain": null,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": []
+  }
+}

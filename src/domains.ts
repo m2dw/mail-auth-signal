@@ -1,15 +1,20 @@
 export function extractDomainFromMailbox(value: string | null): string | null {
   if (!value) return null;
 
-  const angleMatch = /<[^<>@\s]+@([^<>\s]+)>/.exec(value);
-  const domain = angleMatch?.[1] ?? /[^<>@\s]+@([^<>\s,;]+)/.exec(value)?.[1];
+  // The captured domain excludes '@' so a malformed multi-'@' address does not
+  // yield a bogus domain that could trigger a spurious consistency signal.
+  const angleMatch = /<[^<>@\s]+@([^<>@\s]+)>/.exec(value);
+  const domain = angleMatch?.[1] ?? /[^<>@\s]+@([^<>@\s,;]+)/.exec(value)?.[1];
   return normalizeDomain(domain ?? null);
 }
 
 export function extractDomainFromMessageId(value: string | null): string | null {
   if (!value) return null;
 
-  const domain = /@([^>\s]+)>?\s*$/.exec(value.trim())?.[1];
+  // Anchor on the final '@' and exclude '@' from the domain so a malformed
+  // multi-'@' Message-ID resolves to its real trailing domain rather than a
+  // bogus value spanning the extra '@'.
+  const domain = /@([^>@\s]+)>?\s*$/.exec(value.trim())?.[1];
   return normalizeDomain(domain ?? null);
 }
 
