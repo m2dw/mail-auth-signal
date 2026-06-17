@@ -53,15 +53,23 @@ export function extractDomainsFromMailboxList(value: string | null): string[] {
 
 /**
  * Split a mailbox-list on top-level commas only, treating commas inside a
- * quoted string or an angle-addr as ordinary characters. Backslash escapes
- * inside a quoted string are honored so an escaped quote does not prematurely
- * close the string.
+ * quoted string, an angle-addr, or an RFC 5322 comment as ordinary characters.
+ * Backslash escapes inside a quoted string or a comment are honored so an
+ * escaped quote or parenthesis does not prematurely close the construct.
+ *
+ * Comments matter because a value like `(billing@evil.test, Alice)
+ * <alice@example.com>` carries a comma inside the comment before the real
+ * address. Treating that comma as a separator would split off
+ * `(billing@evil.test` and let the single-mailbox extractor fabricate
+ * `evil.test`, producing a bogus mismatch even though the only reply target is
+ * alice@example.com. Comments can nest, so depth is tracked rather than a flag.
  */
 function splitMailboxList(value: string): string[] {
   const parts: string[] = [];
   let current = "";
   let inQuotes = false;
   let inAngle = false;
+  let commentDepth = 0;
   for (let i = 0; i < value.length; i++) {
     const char = value[i];
     if (inQuotes) {
@@ -73,8 +81,23 @@ function splitMailboxList(value: string): string[] {
       current += char;
       continue;
     }
+    if (commentDepth > 0) {
+      if (char === "\\" && i + 1 < value.length) {
+        current += char + value[++i];
+        continue;
+      }
+      if (char === "(") commentDepth++;
+      else if (char === ")") commentDepth--;
+      current += char;
+      continue;
+    }
     if (char === '"') {
       inQuotes = true;
+      current += char;
+      continue;
+    }
+    if (char === "(" && !inAngle) {
+      commentDepth++;
       current += char;
       continue;
     }

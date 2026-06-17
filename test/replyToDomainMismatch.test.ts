@@ -198,6 +198,40 @@ describe("replyToDomainMismatchRule — malformed input avoids noisy signals", (
       extractDomainsFromMailboxList('"a\\" b@evil.test, c" <real@example.com>'),
     ).toEqual(["example.com"]);
   });
+
+  it("does not split a mailbox list inside an RFC comment with a comma", () => {
+    // The comment embeds both an email-like string and a comma before the real
+    // address. A splitter that only tracks quotes and angle-addrs would treat
+    // the comment comma as a separator, yield a `(billing@evil.test` fragment
+    // that resolves to evil.test, and fabricate a mismatch even though the only
+    // real reply target is alice@example.com.
+    expect(
+      extractDomainsFromMailboxList("(billing@evil.test, Alice) <alice@example.com>"),
+    ).toEqual(["example.com"]);
+  });
+
+  it("handles nested RFC comments and a comment after the address", () => {
+    expect(
+      extractDomainsFromMailboxList("<alice@example.com> (note (a@evil.test, b))"),
+    ).toEqual(["example.com"]);
+  });
+
+  it("honors a backslash-escaped parenthesis inside an RFC comment", () => {
+    // The escaped close-paren must not end the comment early, so the embedded
+    // comma stays inside the comment and no bogus domain is extracted.
+    expect(
+      extractDomainsFromMailboxList("(a@evil.test\\), b) <real@example.com>"),
+    ).toEqual(["example.com"]);
+  });
+
+  it("emits no mismatch signal for a comment-comma value that hides an email", () => {
+    const result = analyzeMessage(
+      message("Example <a@example.com>", "(billing@evil.test, Alice) <alice@example.com>"),
+    );
+    expect(result.metrics.replyToDomains).toEqual(["example.com"]);
+    expect(result.metrics.replyToDomainMatchesFromDomain).toBe(true);
+    expect(replyToSignals(result)).toEqual([]);
+  });
 });
 
 describe("replyToDomainMismatchRule — rule in isolation", () => {
