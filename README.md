@@ -47,6 +47,34 @@ const result = analyzeMessage({
 console.log(result.signals);
 ```
 
+## API boundary
+
+`analyzeMessage(input: AnalyzeInput): AnalyzeResult` is the single public analysis entry point.
+
+**What belongs in this library (core)**
+
+| Concern | Type | Notes |
+|---|---|---|
+| Raw header input | `AnalyzeInput.headers` | Any normalized or unnormalized form |
+| Caller environment | `AnalyzeInput.options` | Trusted authserv-ids, future policy context |
+| Extracted facts | `AnalyzeResult.metrics` | Serializable, no interpretation |
+| Keyed observations | `AnalyzeResult.signals` | Severity-tagged, no policy attached |
+
+**What belongs in the caller (not in this library)**
+
+- Threshold evaluation ("is severity ≥ medium a problem for me?")
+- Allow/block/move/notify/quarantine decisions
+- UI rendering, badge colours, notification text
+- Mailbox access, DNS queries, network I/O
+- Storage, logging infrastructure, telemetry
+
+**Caller-provided context (`AnalyzeOptions`)**
+
+The core is pure: it reads no globals, no environment variables, and performs no I/O. All context flows in through `AnalyzeOptions`:
+
+- `trustedAuthservIds` — the authserv-ids the caller's mail system stamps on inbound mail. The caller is responsible for this list; the core has no built-in opinion.
+- `context` — an open-ended serializable bag for future caller-provided policy context (per-sender overrides, allow-listed domains, metadata). Currently ignored by all rules; reserved for rule migration from the Thunderbird add-on.
+
 ## Current status
 
 This repository is in the initial scaffold stage. The first implementation intentionally covers only a small, stable subset:
