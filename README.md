@@ -284,6 +284,9 @@ leaves `dmarcHeaderFromMatchesFromDomain` `null` and emits no signal.
 runs `analyzeMessage`, and prints a JSON result with an example caller-side score.
 
 ```sh
+# Build once before running (dist/ is gitignored):
+npm run build
+
 cat sample.eml | node examples/score-stdin.mjs
 # with a trusted authserv-id:
 cat sample.eml | node examples/score-stdin.mjs --trusted mx.example.net

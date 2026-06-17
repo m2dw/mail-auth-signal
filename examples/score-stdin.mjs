@@ -14,7 +14,18 @@
  */
 
 import { createInterface } from "readline";
-import { analyzeMessage } from "mail-auth-signal";
+
+// When run from the repo, resolve through the built dist. When consumed as an
+// installed package the "mail-auth-signal" specifier works directly, but inside
+// the repo it resolves through package.json exports to ./dist/index.js which
+// requires `npm run build` first.
+let analyzeMessage;
+try {
+  ({ analyzeMessage } = await import("../dist/index.js"));
+} catch {
+  // Fallback: package installed as a dependency (e.g. in a consumer project).
+  ({ analyzeMessage } = await import("mail-auth-signal"));
+}
 
 // ---------------------------------------------------------------------------
 // Example caller policy — weights are yours to adjust.
