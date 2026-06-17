@@ -1,9 +1,10 @@
 {
-  "description": "From domain (example.com) differs from the Message-ID domain (mailer.example.net) on an otherwise clean, trusted, all-passing message, isolating the consistency rule. messageIdDomainMatchesFromDomain is false and a single low-severity messageId.domainMismatch signal is emitted carrying both normalized domains. Low severity reflects that this mismatch is also common for legitimate ESPs/forwarders.",
+  "description": "From domain and the single Reply-To domain agree (both example.com) on an otherwise clean, trusted, all-passing message. replyToDomainMatchesFromDomain is true and no replyTo.domainMismatch signal is emitted. Demonstrates the quiet baseline the consistency rule must not disturb.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
-      "message-id": "<abc123@mailer.example.net>",
+      "reply-to": "Example Support <support@example.com>",
+      "message-id": "<abc123@example.com>",
       "authentication-results": [
         "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
       ]
@@ -15,10 +16,10 @@
   "expected": {
     "metrics": {
       "fromDomain": "example.com",
-      "messageIdDomain": "mailer.example.net",
-      "messageIdDomainMatchesFromDomain": false,
-      "replyToDomains": [],
-      "replyToDomainMatchesFromDomain": null,
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": ["example.com"],
+      "replyToDomainMatchesFromDomain": true,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
@@ -32,13 +33,6 @@
         }
       ]
     },
-    "signals": [
-      {
-        "key": "messageId.domainMismatch",
-        "severity": "low",
-        "message": "Message-ID domain differs from the From domain.",
-        "data": { "fromDomain": "example.com", "messageIdDomain": "mailer.example.net" }
-      }
-    ]
+    "signals": []
   }
 }

@@ -17,6 +17,8 @@
       "fromDomain": "example.com",
       "messageIdDomain": "example.com",
       "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dkim=fail header.d=example.com header.s=sel1",

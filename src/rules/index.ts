@@ -3,11 +3,13 @@ import { missingAuthResultsRule } from "./missingAuthResults.js";
 import { untrustedAuthservIdRule } from "./untrustedAuthservId.js";
 import { authMethodFailureRule } from "./authMethodFailure.js";
 import { messageIdDomainMismatchRule } from "./messageIdDomainMismatch.js";
+import { replyToDomainMismatchRule } from "./replyToDomainMismatch.js";
 
 export { missingAuthResultsRule } from "./missingAuthResults.js";
 export { untrustedAuthservIdRule } from "./untrustedAuthservId.js";
 export { authMethodFailureRule } from "./authMethodFailure.js";
 export { messageIdDomainMismatchRule } from "./messageIdDomainMismatch.js";
+export { replyToDomainMismatchRule } from "./replyToDomainMismatch.js";
 
 /**
  * The built-in rule set, applied in order by analyzeMessage.
@@ -22,6 +24,7 @@ export const defaultRules: readonly Rule[] = [
   untrustedAuthservIdRule,
   authMethodFailureRule,
   messageIdDomainMismatchRule,
+  replyToDomainMismatchRule,
 ];
 
 /**

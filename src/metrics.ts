@@ -1,4 +1,10 @@
-import { domainsExactlyMatch, extractDomainFromMailbox, extractDomainFromMessageId } from "./domains.js";
+import {
+  allDomainsMatch,
+  domainsExactlyMatch,
+  extractDomainFromMailbox,
+  extractDomainFromMessageId,
+  extractDomainsFromMailboxList,
+} from "./domains.js";
 import { getFirstHeaderValue, getHeaderValues, normalizeHeaders } from "./normalizeHeaders.js";
 import { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 import type { AnalyzeInput, MessageMetrics } from "./types.js";
@@ -18,6 +24,16 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
   const fromDomain = extractDomainFromMailbox(getFirstHeaderValue(headers, "from"));
   const messageIdDomain = extractDomainFromMessageId(getFirstHeaderValue(headers, "message-id"));
   const messageIdDomainMatchesFromDomain = domainsExactlyMatch(fromDomain, messageIdDomain);
+
+  // Reply-To is a mailbox-list and may appear more than once; collect every
+  // domain across all header instances, preserving order and dropping repeats.
+  const replyToDomains = [
+    ...new Set(
+      getHeaderValues(headers, "reply-to").flatMap(extractDomainsFromMailboxList),
+    ),
+  ];
+  const replyToDomainMatchesFromDomain = allDomainsMatch(fromDomain, replyToDomains);
+
   const authenticationResults = getHeaderValues(headers, "authentication-results").map((raw) =>
     parseAuthenticationResults(raw, trustedAuthservIds),
   );
@@ -26,6 +42,8 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     fromDomain,
     messageIdDomain,
     messageIdDomainMatchesFromDomain,
+    replyToDomains,
+    replyToDomainMatchesFromDomain,
     authenticationResults,
   };
 }

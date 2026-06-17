@@ -17,6 +17,8 @@
       "fromDomain": "example.com",
       "messageIdDomain": "example.com",
       "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=example.com; dkim=fail header.d=example.com",
