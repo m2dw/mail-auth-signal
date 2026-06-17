@@ -6,6 +6,8 @@ export {
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
+  extractEnvelopeSenderDomain,
+  isNullReversePath,
 } from "./domains.js";
 export {
   defaultRules,
@@ -15,6 +17,9 @@ export {
   authMethodFailureRule,
   messageIdDomainMismatchRule,
   replyToDomainMismatchRule,
+  returnPathDomainMismatchRule,
+  smtpMailfromDomainMismatchRule,
+  envelopeSenderDisagreementRule,
 } from "./rules/index.js";
 export type {
   AnalyzeInput,

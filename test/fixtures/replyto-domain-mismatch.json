@@ -20,6 +20,12 @@
       "messageIdDomainMatchesFromDomain": true,
       "replyToDomains": ["evil.test"],
       "replyToDomainMatchesFromDomain": false,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",

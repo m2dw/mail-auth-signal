@@ -1,0 +1,43 @@
+{
+  "description": "Bounce / delivery-status style message: Return-Path is the null reverse-path `<>` and the SPF result carries smtp.mailfrom=<>, so there is no envelope sender to compare. returnPathDomain and the smtp.mailfrom domain list are empty, returnPathNullReversePath is true (distinguishing an intentional `<>` from a missing header), and every envelope match metric is null. No envelope-sender signal is emitted — a null reverse-path stays silent rather than producing a noisy low-confidence signal.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "return-path": "<>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=none smtp.mailfrom=<>"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": true,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": [],
+      "smtpMailfromDomainMatchesFromDomain": null,
+      "envelopeSenderDomainsAgree": null,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=none smtp.mailfrom=<>",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "none", "properties": { "smtp.mailfrom": "<>" } }
+          ]
+        }
+      ]
+    },
+    "signals": []
+  }
+}

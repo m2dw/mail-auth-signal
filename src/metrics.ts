@@ -4,6 +4,8 @@ import {
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
+  extractEnvelopeSenderDomain,
+  isNullReversePath,
 } from "./domains.js";
 import { getFirstHeaderValue, getHeaderValues, normalizeHeaders } from "./normalizeHeaders.js";
 import { parseAuthenticationResults } from "./parseAuthenticationResults.js";
@@ -38,12 +40,45 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     parseAuthenticationResults(raw, trustedAuthservIds),
   );
 
+  // Return-Path is the envelope reverse-path. Use the first instance (like From
+  // and Message-ID); a null reverse-path (`<>`) and a missing header both leave
+  // no domain to compare, but the flag keeps them distinguishable for callers.
+  const returnPathValue = getFirstHeaderValue(headers, "return-path");
+  const returnPathNullReversePath = isNullReversePath(returnPathValue);
+  const returnPathDomain = extractEnvelopeSenderDomain(returnPathValue);
+  const returnPathDomainMatchesFromDomain = domainsExactlyMatch(fromDomain, returnPathDomain);
+
+  // smtp.mailfrom is the envelope-from SPF authenticated. Collect it from every
+  // SPF result across all Authentication-Results headers, preserving order and
+  // dropping repeats, so a forwarding chain's multiple values are all visible.
+  const smtpMailfromDomains = [
+    ...new Set(
+      authenticationResults.flatMap((header) =>
+        header.methods
+          .filter((method) => method.method === "spf")
+          .map((method) => extractEnvelopeSenderDomain(method.properties["smtp.mailfrom"] ?? null))
+          .filter((domain): domain is string => domain !== null),
+      ),
+    ),
+  ];
+  const smtpMailfromDomainMatchesFromDomain = allDomainsMatch(fromDomain, smtpMailfromDomains);
+
+  // The two envelope-sender views (Return-Path and smtp.mailfrom) should agree;
+  // a disagreement is an internally inconsistent envelope sender.
+  const envelopeSenderDomainsAgree = allDomainsMatch(returnPathDomain, smtpMailfromDomains);
+
   return {
     fromDomain,
     messageIdDomain,
     messageIdDomainMatchesFromDomain,
     replyToDomains,
     replyToDomainMatchesFromDomain,
+    returnPathDomain,
+    returnPathNullReversePath,
+    returnPathDomainMatchesFromDomain,
+    smtpMailfromDomains,
+    smtpMailfromDomainMatchesFromDomain,
+    envelopeSenderDomainsAgree,
     authenticationResults,
   };
 }

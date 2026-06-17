@@ -1,0 +1,54 @@
+{
+  "description": "Envelope-spoof shape seen through SPF: From shows example.com but the SPF-authenticated envelope-from (smtp.mailfrom) is attacker-controlled evil.test. No Return-Path is present, so the rule is isolated to the smtp.mailfrom-vs-From comparison. smtpMailfromDomainMatchesFromDomain is false and a single low-severity smtpMailfrom.domainMismatch signal is emitted carrying the From domain, all smtp.mailfrom domains, and the mismatching subset. Low severity reflects that forwarders and ESPs also legitimately send under a different envelope-from.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; spf=pass smtp.mailfrom=evil.test; dmarc=pass header.from=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["evil.test"],
+      "smtpMailfromDomainMatchesFromDomain": false,
+      "envelopeSenderDomainsAgree": null,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; spf=pass smtp.mailfrom=evil.test; dmarc=pass header.from=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "evil.test" } },
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "smtpMailfrom.domainMismatch",
+        "severity": "low",
+        "message": "SPF smtp.mailfrom domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "smtpMailfromDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
+      }
+    ]
+  }
+}

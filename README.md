@@ -141,6 +141,29 @@ Each signal's `data` includes the `authservId`, a `trusted` flag, and the parsed
 method `properties`. The rule emits observations only; thresholds and actions
 stay with the caller.
 
+### Envelope-sender consistency signals
+
+The envelope sender — the SMTP `MAIL FROM` / reverse-path — is reported through
+two headers: `Return-Path` and the SPF `smtp.mailfrom` property inside
+`Authentication-Results`. Three rules compare those domains:
+
+| Signal | Compares | Attacker pattern | Common false positive |
+|---|---|---|---|
+| `returnPath.domainMismatch` | Return-Path vs From | Recognizable brand in From, attacker-controlled bounce/envelope domain. | ESPs and forwarders legitimately use a distinct bounce/VERP domain. |
+| `smtpMailfrom.domainMismatch` | SPF `smtp.mailfrom` vs From | The same spoof seen through SPF — the mechanical basis of DMARC's SPF alignment. | Forwarding/mailing lists re-send under their own envelope (the reason SPF softfails on forwarded mail). |
+| `envelopeSender.domainDisagreement` | Return-Path vs `smtp.mailfrom` | An internally inconsistent envelope — a sign one field was rewritten or forged. | An intermediate hop may rewrite one field while an earlier AR retains the original. |
+
+All three are **low** severity consistency hints, never verdicts. The comparison
+is exact (a subdomain of From counts as a mismatch), and `smtp.mailfrom` is read
+from every `Authentication-Results` header — including untrusted, forge-able ones
+— so the caller must correlate these with the authentication results
+(`untrustedAuthservIdRule` flags forge-able sources) and its own policy.
+
+Missing envelope context stays silent: a missing `From`, a missing `Return-Path`,
+a null reverse-path (`<>`, a bounce/DSN — surfaced via the
+`returnPathNullReversePath` metric), or a missing/null `smtp.mailfrom` leaves the
+relevant match metric `null` and emits no signal rather than a noisy one.
+
 ## Current status
 
 This repository is in early development. Implemented so far:
@@ -151,6 +174,7 @@ This repository is in early development. Implemented so far:
 - Trusted authserv-id matching, with shared trust resolution for all AR rules
 - Trust-aware Authentication-Results failure signals (SPF/DKIM/DMARC)
 - Message-ID domain comparison
+- Envelope-sender consistency (Return-Path and SPF `smtp.mailfrom` vs From, and the two against each other)
 
 The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 

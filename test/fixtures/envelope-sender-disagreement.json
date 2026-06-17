@@ -1,0 +1,65 @@
+{
+  "description": "The two envelope-sender views disagree: the Return-Path reverse-path is From-aligned (bounce@example.com) but the SPF-authenticated smtp.mailfrom is evil.test. envelopeSenderDomainsAgree is false, emitting envelopeSender.domainDisagreement, and because evil.test also diverges from From the smtpMailfrom.domainMismatch hint fires too. Both are low severity — an intermediate hop can legitimately rewrite one envelope field — so they are correlation hints, not a verdict.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "return-path": "<bounce@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; spf=pass smtp.mailfrom=evil.test; dmarc=pass header.from=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": "example.com",
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": true,
+      "smtpMailfromDomains": ["evil.test"],
+      "smtpMailfromDomainMatchesFromDomain": false,
+      "envelopeSenderDomainsAgree": false,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; spf=pass smtp.mailfrom=evil.test; dmarc=pass header.from=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "evil.test" } },
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "smtpMailfrom.domainMismatch",
+        "severity": "low",
+        "message": "SPF smtp.mailfrom domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "smtpMailfromDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
+      },
+      {
+        "key": "envelopeSender.domainDisagreement",
+        "severity": "low",
+        "message": "Return-Path domain differs from the SPF smtp.mailfrom domain.",
+        "data": {
+          "returnPathDomain": "example.com",
+          "smtpMailfromDomains": ["evil.test"],
+          "disagreeingDomains": ["evil.test"]
+        }
+      }
+    ]
+  }
+}
