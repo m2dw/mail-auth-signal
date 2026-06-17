@@ -1,0 +1,60 @@
+{
+  "family": "auth.method.failure",
+  "description": "A trusted Authentication-Results header reports spf=fail while smtp.mailfrom stays From-aligned (so no envelope consistency signal fires). A trusted, non-DMARC hard fail is reported at medium severity in the 'auth-failure' category; the failing method, result, source, and properties travel in the data payload under the single stable auth.method.failure key.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<id@example.com>",
+      "authentication-results": [
+        "mx.example.net; spf=fail smtp.mailfrom=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": null,
+      "dkimDomains": [],
+      "dkimDomainMatchesFromDomain": null,
+      "dmarcHeaderFromDomains": [],
+      "dmarcHeaderFromMatchesFromDomain": null,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; spf=fail smtp.mailfrom=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "spf", "result": "fail", "properties": { "smtp.mailfrom": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "auth.method.failure",
+        "category": "auth-failure",
+        "severity": "medium",
+        "message": "SPF returned fail.",
+        "data": {
+          "method": "spf",
+          "result": "fail",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "properties": { "smtp.mailfrom": "example.com" }
+        }
+      }
+    ]
+  }
+}

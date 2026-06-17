@@ -1,0 +1,60 @@
+{
+  "family": "messageId.domainMismatch",
+  "description": "From is example.com but the Message-ID is stamped by mailer.example.net. Every authentication method passes and aligns, isolating the From/Message-ID comparison. The mismatch is a low-severity 'consistency' hint carrying fromDomain, messageIdDomain, and the divergent-domain array shared by all consistency signals.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@mailer.example.net>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "mailer.example.net",
+      "messageIdDomainMatchesFromDomain": false,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": null,
+      "dkimDomains": ["example.com"],
+      "dkimDomainMatchesFromDomain": true,
+      "dmarcHeaderFromDomains": ["example.com"],
+      "dmarcHeaderFromMatchesFromDomain": true,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "messageId.domainMismatch",
+        "category": "consistency",
+        "severity": "low",
+        "message": "Message-ID domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "messageIdDomain": "mailer.example.net",
+          "mismatchedDomains": ["mailer.example.net"]
+        }
+      }
+    ]
+  }
+}
