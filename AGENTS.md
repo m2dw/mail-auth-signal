@@ -24,6 +24,16 @@ This repository contains the standalone `mail-auth-signal` library. It is Apache
 - Return serializable data structures suitable for logs, UI display, tests, and cross-language fixture comparison.
 - Keep parsing, metric extraction, and scoring/rule evaluation separate where practical.
 
+## Project Coordination
+
+- Use the `n8n-ai-cli-loop` workflow as the orchestration mechanism for planning, issue handling, implementation, and review unless the user explicitly asks for direct local-only work.
+- Direct local-only work means ad hoc inspection or small edits that the user explicitly asks to perform outside the automation workflow.
+- The target project remains this `mail-auth-signal` repository; do not move project ownership or source changes into the `n8n-ai-cli-loop` repositories.
+- In the local automation environment, treat `/Users/moto/n8n/n8n-ai-cli-loop` as the runner install tree that stays on `main`.
+- In the local automation environment, treat `/Users/moto/git/n8n-ai-cli-loop` as the branch-changing implementation tree for developing the workflow tooling itself, not as the target project for `mail-auth-signal` changes.
+- Keep `mail-auth-signal` independent from the workflow mechanism: do not add n8n runtime dependencies, generated workflow artifacts, or automation state to this repository.
+- When creating issues for migrated detection logic, make the repository boundary explicit: this package owns pure parsing, metrics, and serializable signals; callers own UI, notification, mailbox, and policy actions.
+
 ## Testing
 
 - Add focused tests for every parser edge case and rule change.
@@ -38,4 +48,3 @@ This repository contains the standalone `mail-auth-signal` library. It is Apache
 - Keep public comments and generated docs free of local absolute paths.
 - When adding a rule, document what attacker or false-positive pattern it is meant to handle.
 - When uncertain whether a change belongs here or in the Thunderbird add-on, keep this package narrower and push integration behavior to the caller.
-
