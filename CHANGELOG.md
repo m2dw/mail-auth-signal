@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Added a versioned release and npm publishing process (issue #26):
+  - Documented the full release flow in `RELEASING.md`: SemVer policy, changelog
+    update, version bump, `npm test`, `npm run build`, `npm pack --dry-run`
+    inspection, git tagging (`vX.Y.Z`), publishing, and first-release/trusted-
+    publishing bootstrap steps.
+  - Added the `.github/workflows/release.yml` GitHub Actions workflow. It runs
+    only on maintainer-pushed `v*.*.*` tags, gates publishing behind the
+    `release` environment, verifies the tag matches `package.json` `version`,
+    re-runs tests/build/`npm pack --dry-run`, and publishes with provenance via
+    npm trusted publishing (OIDC) or a maintainer-controlled `NPM_TOKEN`
+    fallback. It does not publish on branch pushes or pull requests.
+  - Added `release:check`, `prepack` (builds `dist/` before packing/publishing),
+    and `prepublishOnly` (typecheck + tests) npm scripts.
+  - Documented the published package contents (`dist`, `README.md`, `LICENSE`,
+    `NOTICE`, `package.json`) and the post-publish `npm install mail-auth-signal`
+    flow in the README. No release is published by this change.
+
 - Prepared package for add-on consumption (issue #24):
   - Fixed `package.json` `main`, `module`, `types`, and `exports` fields to match
     the actual flat `dist/` output produced by tsup (`dist/index.js`,
