@@ -4,6 +4,7 @@ export { normalizeHeaders } from "./normalizeHeaders.js";
 export { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 export {
   extractDkimSigningDomain,
+  extractDmarcHeaderFromDomain,
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
@@ -21,6 +22,7 @@ export {
   returnPathDomainMismatchRule,
   smtpMailfromDomainMismatchRule,
   dkimDomainMismatchRule,
+  dmarcHeaderFromMismatchRule,
   envelopeSenderDisagreementRule,
 } from "./rules/index.js";
 export type {

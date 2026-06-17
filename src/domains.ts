@@ -139,6 +139,37 @@ export function extractEnvelopeSenderDomain(value: string | null): string | null
  * dotted domain.
  */
 export function extractDkimSigningDomain(value: string | null): string | null {
+  return extractBareDomain(value);
+}
+
+/**
+ * Extract the visible-From domain a DMARC verifier evaluated, taken from the
+ * `header.from` property echoed into Authentication-Results as `header.from=...`.
+ *
+ * Like DKIM `header.d`, the DMARC `header.from` is a bare domain with no local
+ * part — the receiver's own parse of the RFC 5322 From domain — so this shares
+ * the bare-domain extractor: RFC 5322 comments are stripped first so an attacker
+ * domain hidden in a comment cannot be pulled out, any value carrying a character
+ * outside the host charset (an '@', angle bracket, whitespace, or a stray comment
+ * paren) is rejected rather than coerced into a fabricated domain, and the result
+ * is normalized (lower-cased, bracket/trailing-dot stripped, dotless hosts
+ * rejected) so casing and formatting never produce a false mismatch. Returns null
+ * when the value is absent or yields no real dotted domain.
+ */
+export function extractDmarcHeaderFromDomain(value: string | null): string | null {
+  return extractBareDomain(value);
+}
+
+/**
+ * Shared extractor for Authentication-Results property values that carry a bare
+ * host with no local part (DKIM `header.d`, DMARC `header.from`). Both are a
+ * plain domain rather than an addr-spec, so this only normalizes and rejects
+ * malformed input: comments are stripped, anything outside the host charset
+ * (letters, digits, dot, hyphen) is rejected rather than coerced into a
+ * fabricated domain that could trigger a spurious consistency signal, and a
+ * dotless host is dropped.
+ */
+function extractBareDomain(value: string | null): string | null {
   if (!value) return null;
   const candidate = stripComments(value).trim();
   if (!candidate || !/^[A-Za-z0-9.-]+$/.test(candidate)) return null;

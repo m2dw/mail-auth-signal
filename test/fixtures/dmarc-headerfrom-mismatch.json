@@ -1,0 +1,58 @@
+{
+  "description": "Parser-differential spoof shape: a trusted authserv-id reports DMARC pass, but the From domain it evaluated (header.from=evil.test) differs from the From the recipient parses (example.com) — a DMARC pass badge applied to a domain the user never sees. SPF smtp.mailfrom, DKIM header.d, and Message-ID all align with the visible From, isolating the header.from-vs-From comparison. dmarcHeaderFromMatchesFromDomain is false and a single low-severity dmarc.headerFromMismatch signal is emitted carrying the visible From domain, all trusted+passing header.from domains, and the mismatching subset. Low severity reflects that exact comparison (no PSL/org-domain logic) can also flag benign subdomain/org differences.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=evil.test; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": null,
+      "dkimDomains": ["example.com"],
+      "dkimDomainMatchesFromDomain": true,
+      "dmarcHeaderFromDomains": ["evil.test"],
+      "dmarcHeaderFromMatchesFromDomain": false,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=evil.test; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "evil.test" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "dmarc.headerFromMismatch",
+        "severity": "low",
+        "message": "DMARC header.from domain differs from the visible From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "dmarcHeaderFromDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
+      }
+    ]
+  }
+}

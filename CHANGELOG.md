@@ -26,4 +26,18 @@
     `dkim-fail.json`, updated `dmarc-fail.json` for the trust-aware severity, and
     added `test/authMethodFailure.test.ts` covering the SPF/DKIM/DMARC
     fail/softfail/temperror/permerror matrix across trusted and untrusted sources.
+- Migrated DMARC `header.from` consistency from the Thunderbird add-on (issue #16):
+  - Added `extractDmarcHeaderFromDomain` (factored a shared bare-domain extractor
+    with `extractDkimSigningDomain`), the `dmarcHeaderFromDomains` and
+    `dmarcHeaderFromMatchesFromDomain` metrics, and `dmarcHeaderFromMismatchRule`,
+    which emits a low-severity `dmarc.headerFromMismatch` when the DMARC-evaluated
+    `header.from` differs from the visible `From` domain.
+  - The metric is gated on both `pass` and trusted authserv-id, so a failed,
+    missing, malformed, or untrusted DMARC context never produces a signal —
+    `header.from` is not cryptographic, so an untrusted header's value is just an
+    attacker assertion and a non-`pass` result vouches for nothing.
+  - Added fixtures `dmarc-headerfrom-match.json`, `dmarc-headerfrom-mismatch.json`,
+    and `dmarc-headerfrom-untrusted.json`, added
+    `test/dmarcHeaderFromMismatch.test.ts`, and extended every existing
+    full-metrics fixture with the two new metric fields.
 

@@ -2,6 +2,7 @@ import {
   allDomainsMatch,
   domainsExactlyMatch,
   extractDkimSigningDomain,
+  extractDmarcHeaderFromDomain,
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
@@ -85,6 +86,29 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
   ];
   const dkimDomainMatchesFromDomain = allDomainsMatch(fromDomain, dkimDomains);
 
+  // header.from is the visible-From domain a DMARC verifier evaluated. Two gates
+  // apply, unlike the DKIM header.d collection above. (1) Pass only: a non-pass
+  // DMARC vouches for nothing, so its header.from must not read as a verified
+  // From view — neither a false alignment nor a fabricated mismatch; a failed
+  // DMARC is already surfaced by authMethodFailureRule. (2) Trusted headers only:
+  // header.from is not cryptographic, so a forge-able untrusted header's value is
+  // just the attacker's own assertion and a mismatch (or match) there is noise.
+  // Collect from every trusted, passing DMARC result across all headers,
+  // preserving order and dropping repeats.
+  const dmarcHeaderFromDomains = [
+    ...new Set(
+      authenticationResults
+        .filter((header) => header.trusted)
+        .flatMap((header) =>
+          header.methods
+            .filter((method) => method.method === "dmarc" && method.result === "pass")
+            .map((method) => extractDmarcHeaderFromDomain(method.properties["header.from"] ?? null))
+            .filter((domain): domain is string => domain !== null),
+        ),
+    ),
+  ];
+  const dmarcHeaderFromMatchesFromDomain = allDomainsMatch(fromDomain, dmarcHeaderFromDomains);
+
   return {
     fromDomain,
     messageIdDomain,
@@ -99,6 +123,8 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     envelopeSenderDomainsAgree,
     dkimDomains,
     dkimDomainMatchesFromDomain,
+    dmarcHeaderFromDomains,
+    dmarcHeaderFromMatchesFromDomain,
     authenticationResults,
   };
 }
