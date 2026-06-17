@@ -1,0 +1,61 @@
+{
+  "description": "DMARC fails on a header from an undeclared (untrusted) authserv-id, and the Message-ID domain differs from the From domain. Demonstrates the full serializable AnalyzeResult shape that follow-up rule-migration issues target.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@mailer.example.net>",
+      "authentication-results": [
+        "mx.example.net; dmarc=fail header.from=example.com; spf=pass smtp.mailfrom=example.com"
+      ]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "mailer.example.net",
+      "messageIdDomainMatchesFromDomain": false,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=fail header.from=example.com; spf=pass smtp.mailfrom=example.com",
+          "authservId": "mx.example.net",
+          "trusted": false,
+          "methods": [
+            {
+              "method": "dmarc",
+              "result": "fail",
+              "properties": { "header.from": "example.com" }
+            },
+            {
+              "method": "spf",
+              "result": "pass",
+              "properties": { "smtp.mailfrom": "example.com" }
+            }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "authResults.untrustedAuthservId",
+        "severity": "low",
+        "message": "Authentication-Results header was produced by an untrusted authserv-id.",
+        "data": { "authservId": "mx.example.net" }
+      },
+      {
+        "key": "auth.dmarc.fail",
+        "severity": "medium",
+        "message": "DMARC returned fail.",
+        "data": {
+          "authservId": "mx.example.net",
+          "properties": { "header.from": "example.com" }
+        }
+      },
+      {
+        "key": "messageId.domainMismatch",
+        "severity": "low",
+        "message": "Message-ID domain differs from the From domain.",
+        "data": { "fromDomain": "example.com", "messageIdDomain": "mailer.example.net" }
+      }
+    ]
+  }
+}
