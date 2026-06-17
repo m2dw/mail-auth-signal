@@ -1,5 +1,9 @@
 # Mail Auth Signal
 
+[![CI](https://github.com/m2dw/mail-auth-signal/actions/workflows/ci.yml/badge.svg)](https://github.com/m2dw/mail-auth-signal/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/mail-auth-signal)](https://www.npmjs.com/package/mail-auth-signal)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 Mail Auth Signal is a lightweight sender-risk signal engine for email authentication results and header consistency analysis.
 
 It is intended to be the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
