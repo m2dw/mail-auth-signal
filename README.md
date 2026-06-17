@@ -24,7 +24,13 @@ It is intended to be the standalone, Apache-2.0 licensed core extracted from the
 npm install mail-auth-signal
 ```
 
-The package is not published yet. During early development, use this repository directly.
+The package is published to the public npm registry as `mail-auth-signal` and is
+installable by any consumer, including the Thunderbird add-on. If the install
+above fails with `E404`, the first release has not been cut yet — until then, use
+this repository directly.
+
+Maintainers: see [RELEASING.md](./RELEASING.md) for the versioned release and
+npm publishing process.
 
 ## Usage
 

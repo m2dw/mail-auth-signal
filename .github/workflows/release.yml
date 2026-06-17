@@ -1,0 +1,79 @@
+# Publishes mail-auth-signal to npm when a version tag (vX.Y.Z) is pushed.
+#
+# Safety properties:
+#   - Triggers ONLY on a maintainer-pushed `v*.*.*` tag, never on branch pushes
+#     or pull requests. Forked PRs cannot reach the publish step.
+#   - Runs through the `release` GitHub Environment, so a maintainer can require
+#     manual approval and scope the npm credentials to this job only.
+#   - Verifies that the pushed tag matches `package.json` `version` before any
+#     publish, so a mistyped tag fails loudly instead of shipping the wrong
+#     version.
+#   - Runs `npm test`, `npm run build`, and `npm pack --dry-run` before publish.
+#   - Prefers npm trusted publishing (OIDC) with provenance. If trusted
+#     publishing is not yet configured on npmjs.com, the job falls back to the
+#     maintainer-controlled `NPM_TOKEN` secret. See RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Least privilege at the top level; the publish job opts into id-token below.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Requires a `release` Environment in repo settings. Add required reviewers
+    # there to gate every publish behind explicit maintainer approval.
+    environment: release
+    permissions:
+      contents: read
+      # Required for npm trusted publishing and `--provenance` attestation.
+      id-token: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing (tokenless OIDC) requires a recent npm. Upgrading
+      # also keeps provenance generation current.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag matches package.json version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          echo "tag=${tag_version} package.json=${pkg_version}"
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${pkg_version}"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Inspect package contents
+        run: npm pack --dry-run
+
+      # With trusted publishing configured on npmjs.com, NODE_AUTH_TOKEN is
+      # unused and can be removed. It is kept here so the workflow also works
+      # with a classic automation token until trusted publishing is set up.
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
