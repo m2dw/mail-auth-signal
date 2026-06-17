@@ -1,0 +1,57 @@
+{
+  "name": "mail-auth-signal",
+  "version": "0.1.0",
+  "description": "A lightweight sender-risk signal engine for email authentication results and header consistency analysis.",
+  "license": "Apache-2.0",
+  "author": "m2dw",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --out-dir dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m2dw/mail-auth-signal.git"
+  },
+  "bugs": {
+    "url": "https://github.com/m2dw/mail-auth-signal/issues"
+  },
+  "homepage": "https://github.com/m2dw/mail-auth-signal#readme",
+  "keywords": [
+    "email",
+    "dmarc",
+    "spf",
+    "dkim",
+    "authentication-results",
+    "sender-risk",
+    "mail-security"
+  ]
+}
+
