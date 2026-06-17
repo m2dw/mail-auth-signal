@@ -6,6 +6,7 @@ import { messageIdDomainMismatchRule } from "./messageIdDomainMismatch.js";
 import { replyToDomainMismatchRule } from "./replyToDomainMismatch.js";
 import { returnPathDomainMismatchRule } from "./returnPathDomainMismatch.js";
 import { smtpMailfromDomainMismatchRule } from "./smtpMailfromDomainMismatch.js";
+import { dkimDomainMismatchRule } from "./dkimDomainMismatch.js";
 import { envelopeSenderDisagreementRule } from "./envelopeSenderDisagreement.js";
 
 export { missingAuthResultsRule } from "./missingAuthResults.js";
@@ -15,6 +16,7 @@ export { messageIdDomainMismatchRule } from "./messageIdDomainMismatch.js";
 export { replyToDomainMismatchRule } from "./replyToDomainMismatch.js";
 export { returnPathDomainMismatchRule } from "./returnPathDomainMismatch.js";
 export { smtpMailfromDomainMismatchRule } from "./smtpMailfromDomainMismatch.js";
+export { dkimDomainMismatchRule } from "./dkimDomainMismatch.js";
 export { envelopeSenderDisagreementRule } from "./envelopeSenderDisagreement.js";
 
 /**
@@ -33,6 +35,7 @@ export const defaultRules: readonly Rule[] = [
   replyToDomainMismatchRule,
   returnPathDomainMismatchRule,
   smtpMailfromDomainMismatchRule,
+  dkimDomainMismatchRule,
   envelopeSenderDisagreementRule,
 ];
 

@@ -1,0 +1,56 @@
+{
+  "description": "DKIM-misalignment spoof shape: From shows example.com but the only passing DKIM signature signs for attacker-controlled evil.test. The SPF smtp.mailfrom still aligns with From (so DMARC can pass on SPF alignment and the envelope-sender rules stay silent), isolating the DKIM-vs-From comparison. dkimDomainMatchesFromDomain is false and a single low-severity dkim.domainMismatch signal is emitted carrying the From domain, all passing DKIM signing domains, and the mismatching subset. Low severity reflects that ESPs and platforms also legitimately sign brand mail under their own domain.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=evil.test"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": null,
+      "dkimDomains": ["evil.test"],
+      "dkimDomainMatchesFromDomain": false,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=evil.test",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "evil.test" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "dkim.domainMismatch",
+        "severity": "low",
+        "message": "DKIM header.d signing domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "dkimDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
+      }
+    ]
+  }
+}

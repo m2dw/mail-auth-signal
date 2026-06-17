@@ -3,6 +3,7 @@ export { extractMetrics } from "./metrics.js";
 export { normalizeHeaders } from "./normalizeHeaders.js";
 export { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 export {
+  extractDkimSigningDomain,
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
@@ -19,6 +20,7 @@ export {
   replyToDomainMismatchRule,
   returnPathDomainMismatchRule,
   smtpMailfromDomainMismatchRule,
+  dkimDomainMismatchRule,
   envelopeSenderDisagreementRule,
 } from "./rules/index.js";
 export type {

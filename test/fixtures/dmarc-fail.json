@@ -22,6 +22,8 @@
       "smtpMailfromDomains": ["example.com"],
       "smtpMailfromDomainMatchesFromDomain": true,
       "envelopeSenderDomainsAgree": null,
+      "dkimDomains": [],
+      "dkimDomainMatchesFromDomain": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=fail header.from=example.com; spf=pass smtp.mailfrom=example.com",

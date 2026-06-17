@@ -117,6 +117,28 @@ export function extractEnvelopeSenderDomain(value: string | null): string | null
   return normalizeDomain(domain);
 }
 
+/**
+ * Extract the signing domain from a DKIM `header.d` value — the `d=` tag a DKIM
+ * signature claims, echoed into Authentication-Results as `header.d=...`.
+ *
+ * Unlike a From/Reply-To mailbox or an envelope sender, header.d is a bare
+ * domain with no local part, so this only normalizes and rejects malformed
+ * input rather than parsing an addr-spec. Hardening mirrors the other
+ * extractors: RFC 5322 comments are stripped first so an attacker domain hidden
+ * in a comment cannot be pulled out, and any value carrying an '@', angle
+ * bracket, or embedded whitespace is rejected rather than coerced into a
+ * fabricated domain that could trigger a spurious consistency signal. The result
+ * is normalized (lower-cased, bracket/trailing-dot stripped, dotless hosts
+ * rejected) so casing and formatting never produce a false mismatch. Returns
+ * null when the value is absent or yields no real dotted domain.
+ */
+export function extractDkimSigningDomain(value: string | null): string | null {
+  if (!value) return null;
+  const candidate = stripComments(value).trim();
+  if (!candidate || /[\s@<>]/.test(candidate)) return null;
+  return normalizeDomain(candidate);
+}
+
 export function domainsExactlyMatch(left: string | null, right: string | null): boolean | null {
   if (!left || !right) return null;
   return left === right;

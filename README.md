@@ -164,6 +164,31 @@ a null reverse-path (`<>`, a bounce/DSN — surfaced via the
 `returnPathNullReversePath` metric), or a missing/null `smtp.mailfrom` leaves the
 relevant match metric `null` and emits no signal rather than a noisy one.
 
+### DKIM signing-domain consistency signal
+
+`dkimDomainMismatchRule` compares the DKIM signing domain (`header.d`) against the
+`From` domain — the DKIM-alignment view of the same check DMARC performs.
+
+| Signal | Compares | Attacker pattern | Common false positive |
+|---|---|---|---|
+| `dkim.domainMismatch` | DKIM `header.d` vs From | A recognizable brand in From, but the message is validly DKIM-signed by an attacker-controlled domain — authenticated mail that the visible sender's domain never vouched for. | ESPs and platforms legitimately sign brand mail under their own domain or a subdomain, and mail may carry several signatures (author plus forwarder/list). |
+
+**Only passing signatures count.** The `dkimDomains` metric is populated solely
+from DKIM results that returned `pass`; a `fail`/`temperror`/`permerror`/`neutral`/`none`
+signature authenticates nothing, so its `header.d` never enters the comparison.
+This is deliberate: a broken signature claiming `header.d = ` the From domain must
+not read as alignment, and a broken signature claiming an attacker domain must not
+manufacture a mismatch. `authMethodFailureRule` surfaces the failure itself.
+
+Like the envelope-sender hints, this is a **low**-severity consistency hint, never
+a verdict. The comparison is exact (a subdomain of From counts as a mismatch), a
+single divergent signing domain among several is enough to flag (the
+`mismatchedDomains` subset is reported), and `header.d` is read from every
+`Authentication-Results` header — including untrusted, forge-able ones, which
+`untrustedAuthservIdRule` flags separately. Missing context stays silent: a missing
+`From`, no passing DKIM result, or an unparseable `header.d` leaves
+`dkimDomainMatchesFromDomain` `null` and emits no signal.
+
 ## Current status
 
 This repository is in early development. Implemented so far:
@@ -175,6 +200,7 @@ This repository is in early development. Implemented so far:
 - Trust-aware Authentication-Results failure signals (SPF/DKIM/DMARC)
 - Message-ID domain comparison
 - Envelope-sender consistency (Return-Path and SPF `smtp.mailfrom` vs From, and the two against each other)
+- DKIM signing-domain consistency (passing `header.d` vs From)
 
 The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 

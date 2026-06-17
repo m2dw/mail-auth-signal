@@ -94,6 +94,22 @@ export type MessageMetrics = {
    * false when they disagree — an internally inconsistent envelope sender.
    */
   envelopeSenderDomainsAgree: boolean | null;
+  /**
+   * Every resolvable, normalized DKIM signing domain (`header.d`) taken only
+   * from DKIM results that passed, across all Authentication-Results headers, in
+   * encounter order and deduplicated. A failed/error/neutral DKIM signature
+   * authenticates nothing, so its header.d is deliberately excluded — a broken
+   * signature's claimed domain must never read as From-alignment. Empty when no
+   * passing DKIM result carries a parseable header.d.
+   */
+  dkimDomains: string[];
+  /**
+   * Whether all dkimDomains exactly match fromDomain (the DKIM-alignment view of
+   * the same check DMARC performs). null when no comparison was possible (missing
+   * From, or no passing DKIM signing domain), so a failed or missing DKIM
+   * signature never reads as a mismatch. false when any signing domain differs.
+   */
+  dkimDomainMatchesFromDomain: boolean | null;
   authenticationResults: AuthenticationResultsHeader[];
 };
 

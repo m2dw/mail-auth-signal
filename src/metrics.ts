@@ -1,6 +1,7 @@
 import {
   allDomainsMatch,
   domainsExactlyMatch,
+  extractDkimSigningDomain,
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
@@ -67,6 +68,23 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
   // a disagreement is an internally inconsistent envelope sender.
   const envelopeSenderDomainsAgree = allDomainsMatch(returnPathDomain, smtpMailfromDomains);
 
+  // header.d is the domain a DKIM signature signs for. Only a passing signature
+  // actually authenticates that domain, so failed/error/neutral DKIM results are
+  // excluded here — a broken signature's header.d proves nothing and must not
+  // read as From-alignment. Collect from every passing DKIM result across all
+  // Authentication-Results headers, preserving order and dropping repeats.
+  const dkimDomains = [
+    ...new Set(
+      authenticationResults.flatMap((header) =>
+        header.methods
+          .filter((method) => method.method === "dkim" && method.result === "pass")
+          .map((method) => extractDkimSigningDomain(method.properties["header.d"] ?? null))
+          .filter((domain): domain is string => domain !== null),
+      ),
+    ),
+  ];
+  const dkimDomainMatchesFromDomain = allDomainsMatch(fromDomain, dkimDomains);
+
   return {
     fromDomain,
     messageIdDomain,
@@ -79,6 +97,8 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     smtpMailfromDomains,
     smtpMailfromDomainMatchesFromDomain,
     envelopeSenderDomainsAgree,
+    dkimDomains,
+    dkimDomainMatchesFromDomain,
     authenticationResults,
   };
 }
