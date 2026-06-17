@@ -25,6 +25,8 @@
       "smtpMailfromDomains": ["fwd.example.org"],
       "smtpMailfromDomainMatchesFromDomain": false,
       "envelopeSenderDomainsAgree": null,
+      "dkimDomains": [],
+      "dkimDomainMatchesFromDomain": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; spf=softfail smtp.mailfrom=fwd.example.org",
