@@ -1,11 +1,62 @@
 export function extractDomainFromMailbox(value: string | null): string | null {
   if (!value) return null;
 
+  // Strip RFC 5322 comments first. A valid mailbox can carry a comment before a
+  // bare addr-spec, e.g. `(billing@evil.test, Alice) alice@example.com`; without
+  // removing it the fallback regex would scan from the start and pull the
+  // attacker domain out of the comment instead of the real reply target.
+  const withoutComments = stripComments(value);
+
   // The captured domain excludes '@' so a malformed multi-'@' address does not
   // yield a bogus domain that could trigger a spurious consistency signal.
-  const angleMatch = /<[^<>@\s]+@([^<>@\s]+)>/.exec(value);
-  const domain = angleMatch?.[1] ?? /[^<>@\s]+@([^<>@\s,;]+)/.exec(value)?.[1];
+  const angleMatch = /<[^<>@\s]+@([^<>@\s]+)>/.exec(withoutComments);
+  const domain = angleMatch?.[1] ?? /[^<>@\s]+@([^<>@\s,;]+)/.exec(withoutComments)?.[1];
   return normalizeDomain(domain ?? null);
+}
+
+/**
+ * Remove RFC 5322 comments (`(...)`) from a mailbox value. Comments may nest and
+ * may contain backslash escapes, and parentheses inside a quoted string are
+ * literal rather than comment delimiters, so all three are tracked here. The
+ * stripped text is only used for domain extraction, so collapsing each comment
+ * to nothing is fine — no real addr-spec lives inside a comment.
+ */
+function stripComments(value: string): string {
+  let result = "";
+  let inQuotes = false;
+  let commentDepth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (inQuotes) {
+      if (char === "\\" && i + 1 < value.length) {
+        result += char + value[++i];
+        continue;
+      }
+      if (char === '"') inQuotes = false;
+      result += char;
+      continue;
+    }
+    if (commentDepth > 0) {
+      if (char === "\\" && i + 1 < value.length) {
+        i++;
+        continue;
+      }
+      if (char === "(") commentDepth++;
+      else if (char === ")") commentDepth--;
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = true;
+      result += char;
+      continue;
+    }
+    if (char === "(") {
+      commentDepth++;
+      continue;
+    }
+    result += char;
+  }
+  return result;
 }
 
 export function extractDomainFromMessageId(value: string | null): string | null {

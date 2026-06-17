@@ -210,6 +210,24 @@ describe("replyToDomainMismatchRule — malformed input avoids noisy signals", (
     ).toEqual(["example.com"]);
   });
 
+  it("ignores a comment before a bare addr-spec (no angle brackets)", () => {
+    // The comment precedes a bare address with no `<...>`, so the angle-addr
+    // path cannot win and the fallback regex would otherwise scan from the start
+    // and pull evil.test out of the comment instead of the real reply target.
+    expect(
+      extractDomainsFromMailboxList("(billing@evil.test, Alice) alice@example.com"),
+    ).toEqual(["example.com"]);
+  });
+
+  it("emits no mismatch signal for a comment before a bare addr-spec", () => {
+    const result = analyzeMessage(
+      message("Example <a@example.com>", "(billing@evil.test, Alice) alice@example.com"),
+    );
+    expect(result.metrics.replyToDomains).toEqual(["example.com"]);
+    expect(result.metrics.replyToDomainMatchesFromDomain).toBe(true);
+    expect(replyToSignals(result)).toEqual([]);
+  });
+
   it("handles nested RFC comments and a comment after the address", () => {
     expect(
       extractDomainsFromMailboxList("<alice@example.com> (note (a@evil.test, b))"),
