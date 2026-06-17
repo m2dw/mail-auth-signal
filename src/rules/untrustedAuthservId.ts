@@ -1,4 +1,4 @@
-import { isTrustedAuthservId } from "../parseAuthenticationResults.js";
+import { resolveHeaderTrust } from "./trust.js";
 import type { Rule } from "../types.js";
 
 /**
@@ -23,13 +23,8 @@ export const untrustedAuthservIdRule: Rule = {
   scope: "header",
   description: "An Authentication-Results header came from an untrusted authserv-id.",
   evaluate({ metrics, options }) {
-    const overrideTrustedIds = options.trustedAuthservIds;
     return metrics.authenticationResults
-      .filter((header) =>
-        overrideTrustedIds === undefined
-          ? !header.trusted
-          : !isTrustedAuthservId(header.authservId, overrideTrustedIds),
-      )
+      .filter((header) => !resolveHeaderTrust(header, options))
       .map((header) => ({
         key: "authResults.untrustedAuthservId",
         severity: "low" as const,

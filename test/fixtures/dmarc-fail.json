@@ -1,5 +1,5 @@
 {
-  "description": "DMARC fails on a header from an undeclared (untrusted) authserv-id, and the Message-ID domain differs from the From domain. Demonstrates the full serializable AnalyzeResult shape that follow-up rule-migration issues target.",
+  "description": "DMARC fails on a header from an undeclared (untrusted) authserv-id, and the Message-ID domain differs from the From domain. Because the authserv-id is untrusted the failure is non-authoritative (it could be forged) and is reported at low severity with trusted:false, while untrustedAuthservIdRule separately flags the source. Demonstrates the full serializable AnalyzeResult shape that follow-up rule-migration issues target.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
@@ -43,10 +43,11 @@
       },
       {
         "key": "auth.dmarc.fail",
-        "severity": "medium",
+        "severity": "low",
         "message": "DMARC returned fail.",
         "data": {
           "authservId": "mx.example.net",
+          "trusted": false,
           "properties": { "header.from": "example.com" }
         }
       },

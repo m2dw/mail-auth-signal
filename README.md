@@ -117,21 +117,42 @@ const fromDomainMissingRule: Rule = {
 const result = analyzeMessage(input, [...defaultRules, fromDomainMissingRule]);
 ```
 
-`test/fixtures/dmarc-fail.json` is a JSON fixture (input + expected
-`AnalyzeResult`) that pins the serializable output shape for tests and
+The `test/fixtures/*.json` files are JSON fixtures (input + expected
+`AnalyzeResult`) that pin the serializable output shape for tests and
 cross-language ports.
+
+### Authentication-Results failure signals
+
+`authMethodFailureRule` reports each SPF/DKIM/DMARC method that returned a
+failing or error result (`fail`, `softfail`, `temperror`, `permerror`) as an
+`auth.<method>.<result>` signal. Severity is **trust-aware**, because an
+`Authentication-Results` header can be forged by anyone upstream and is only
+authoritative when stamped by an authserv-id the caller declared in
+`trustedAuthservIds`:
+
+| Result (from a **trusted** authserv-id) | Severity | Rationale |
+|---|---|---|
+| `dmarc=fail` | high | Message is unaligned with its own From domain — the canonical direct-domain spoofing signal. |
+| `spf=fail` / `dkim=fail` | medium | Strong hint, but legitimate forwarding (SPF) and mailing-list body rewrites (DKIM) also break these. |
+| `softfail` / `temperror` / `permerror` | low | Deliberately non-committal, or a transient/sender-side configuration error. |
+| any of the above from an **untrusted** authserv-id | low | Non-authoritative — the header could be forged. `untrustedAuthservIdRule` flags the source separately. |
+
+Each signal's `data` includes the `authservId`, a `trusted` flag, and the parsed
+method `properties`. The rule emits observations only; thresholds and actions
+stay with the caller.
 
 ## Current status
 
-This repository is in the initial scaffold stage. The first implementation intentionally covers only a small, stable subset:
+This repository is in early development. Implemented so far:
 
 - Header normalization
 - Basic mailbox/domain extraction
-- Basic `Authentication-Results` method/result extraction
-- Trusted authserv-id matching
+- `Authentication-Results` method/result extraction
+- Trusted authserv-id matching, with shared trust resolution for all AR rules
+- Trust-aware Authentication-Results failure signals (SPF/DKIM/DMARC)
 - Message-ID domain comparison
 
-The richer Layer 1-5 rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
+The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 
 ## License
 
