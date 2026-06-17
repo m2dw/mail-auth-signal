@@ -55,6 +55,45 @@ export type MessageMetrics = {
    * Reply-To never reads as a mismatch. false when any Reply-To domain differs.
    */
   replyToDomainMatchesFromDomain: boolean | null;
+  /**
+   * The normalized domain of the Return-Path (envelope reverse-path), or null
+   * when Return-Path is absent, a null reverse-path (`<>`), or yields no real
+   * dotted domain.
+   */
+  returnPathDomain: string | null;
+  /**
+   * True only when Return-Path is an explicit null reverse-path (`<>`), i.e. a
+   * bounce / delivery-status notification with no envelope sender. Lets callers
+   * tell an intentional `<>` apart from a missing or unparseable Return-Path,
+   * both of which leave returnPathDomain null.
+   */
+  returnPathNullReversePath: boolean;
+  /**
+   * Whether returnPathDomain exactly matches fromDomain. null when no comparison
+   * was possible (missing From, or no Return-Path domain), so a missing or null
+   * Return-Path never reads as a mismatch. false when the domains differ.
+   */
+  returnPathDomainMatchesFromDomain: boolean | null;
+  /**
+   * Every resolvable, normalized domain parsed from an SPF `smtp.mailfrom`
+   * property across all Authentication-Results headers, in encounter order and
+   * deduplicated. Empty when no SPF result carries a parseable envelope-from
+   * domain (absent, null `<>`, or unparseable).
+   */
+  smtpMailfromDomains: string[];
+  /**
+   * Whether all smtpMailfromDomains exactly match fromDomain. null when no
+   * comparison was possible (missing From, or no smtp.mailfrom domain), so a
+   * missing SPF smtp.mailfrom never reads as a mismatch. false when any differs.
+   */
+  smtpMailfromDomainMatchesFromDomain: boolean | null;
+  /**
+   * Whether the Return-Path domain and every smtp.mailfrom domain agree with
+   * each other (the two views of the same envelope sender). null when no
+   * comparison was possible (no Return-Path domain, or no smtp.mailfrom domain).
+   * false when they disagree — an internally inconsistent envelope sender.
+   */
+  envelopeSenderDomainsAgree: boolean | null;
   authenticationResults: AuthenticationResultsHeader[];
 };
 

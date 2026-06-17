@@ -1,5 +1,5 @@
 {
-  "description": "SPF softfail from a trusted authserv-id. A softfail (the domain's `~all`) is deliberately non-committal and is a common artifact of legitimate forwarding, so even from a trusted source it is reported low — the false-positive mitigation for forwarded mail.",
+  "description": "SPF softfail from a trusted authserv-id. A softfail (the domain's `~all`) is deliberately non-committal and is a common artifact of legitimate forwarding, so even from a trusted source it is reported low — the false-positive mitigation for forwarded mail. The forwarding envelope-from (smtp.mailfrom=fwd.example.org) also differs from the From domain, so a low-severity smtpMailfrom.domainMismatch consistency hint accompanies it — exactly the documented forwarding false-positive that keeps the envelope-sender signal low.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
@@ -19,6 +19,12 @@
       "messageIdDomainMatchesFromDomain": true,
       "replyToDomains": [],
       "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["fwd.example.org"],
+      "smtpMailfromDomainMatchesFromDomain": false,
+      "envelopeSenderDomainsAgree": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; spf=softfail smtp.mailfrom=fwd.example.org",
@@ -43,6 +49,16 @@
           "authservId": "mx.example.net",
           "trusted": true,
           "properties": { "smtp.mailfrom": "fwd.example.org" }
+        }
+      },
+      {
+        "key": "smtpMailfrom.domainMismatch",
+        "severity": "low",
+        "message": "SPF smtp.mailfrom domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "smtpMailfromDomains": ["fwd.example.org"],
+          "mismatchedDomains": ["fwd.example.org"]
         }
       }
     ]

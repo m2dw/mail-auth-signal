@@ -1,0 +1,53 @@
+{
+  "description": "Envelope-spoof shape: From shows example.com but the Return-Path reverse-path bounces to attacker-controlled evil.test. The trusted Authentication-Results header carries no SPF result, so smtp.mailfrom is absent and the rule is isolated to the Return-Path-vs-From comparison. returnPathDomainMatchesFromDomain is false and a single low-severity returnPath.domainMismatch signal is emitted carrying the From and Return-Path domains. Low severity reflects that ESPs and forwarders also legitimately use a distinct bounce domain.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "return-path": "<bounce@evil.test>",
+      "message-id": "<abc123@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": "evil.test",
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": false,
+      "smtpMailfromDomains": [],
+      "smtpMailfromDomainMatchesFromDomain": null,
+      "envelopeSenderDomainsAgree": null,
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "returnPath.domainMismatch",
+        "severity": "low",
+        "message": "Return-Path domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "returnPathDomain": "evil.test"
+        }
+      }
+    ]
+  }
+}

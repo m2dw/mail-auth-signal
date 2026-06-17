@@ -1,9 +1,8 @@
 {
-  "description": "From domain and the single Reply-To domain agree (both example.com) on an otherwise clean, trusted, all-passing message. replyToDomainMatchesFromDomain is true and no replyTo.domainMismatch signal is emitted. Demonstrates the quiet baseline the consistency rule must not disturb.",
+  "description": "No Return-Path header is present on an otherwise clean, trusted, all-passing message whose smtp.mailfrom aligns with From. returnPathDomain is null and returnPathNullReversePath is false (distinguishing a missing header from an intentional `<>`), so returnPathDomainMatchesFromDomain and envelopeSenderDomainsAgree are null and no Return-Path signal is emitted. Confirms a missing Return-Path stays silent rather than producing a noisy low-confidence signal.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
-      "reply-to": "Example Support <support@example.com>",
       "message-id": "<abc123@example.com>",
       "authentication-results": [
         "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
@@ -18,8 +17,8 @@
       "fromDomain": "example.com",
       "messageIdDomain": "example.com",
       "messageIdDomainMatchesFromDomain": true,
-      "replyToDomains": ["example.com"],
-      "replyToDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
       "returnPathDomain": null,
       "returnPathNullReversePath": false,
       "returnPathDomainMatchesFromDomain": null,

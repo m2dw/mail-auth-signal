@@ -4,12 +4,18 @@ import { untrustedAuthservIdRule } from "./untrustedAuthservId.js";
 import { authMethodFailureRule } from "./authMethodFailure.js";
 import { messageIdDomainMismatchRule } from "./messageIdDomainMismatch.js";
 import { replyToDomainMismatchRule } from "./replyToDomainMismatch.js";
+import { returnPathDomainMismatchRule } from "./returnPathDomainMismatch.js";
+import { smtpMailfromDomainMismatchRule } from "./smtpMailfromDomainMismatch.js";
+import { envelopeSenderDisagreementRule } from "./envelopeSenderDisagreement.js";
 
 export { missingAuthResultsRule } from "./missingAuthResults.js";
 export { untrustedAuthservIdRule } from "./untrustedAuthservId.js";
 export { authMethodFailureRule } from "./authMethodFailure.js";
 export { messageIdDomainMismatchRule } from "./messageIdDomainMismatch.js";
 export { replyToDomainMismatchRule } from "./replyToDomainMismatch.js";
+export { returnPathDomainMismatchRule } from "./returnPathDomainMismatch.js";
+export { smtpMailfromDomainMismatchRule } from "./smtpMailfromDomainMismatch.js";
+export { envelopeSenderDisagreementRule } from "./envelopeSenderDisagreement.js";
 
 /**
  * The built-in rule set, applied in order by analyzeMessage.
@@ -25,6 +31,9 @@ export const defaultRules: readonly Rule[] = [
   authMethodFailureRule,
   messageIdDomainMismatchRule,
   replyToDomainMismatchRule,
+  returnPathDomainMismatchRule,
+  smtpMailfromDomainMismatchRule,
+  envelopeSenderDisagreementRule,
 ];
 
 /**

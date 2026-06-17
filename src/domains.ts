@@ -69,6 +69,54 @@ export function extractDomainFromMessageId(value: string | null): string | null 
   return normalizeDomain(domain ?? null);
 }
 
+/**
+ * Whether a Return-Path value is the RFC 5321 null reverse-path `<>`.
+ *
+ * A null reverse-path marks a bounce / delivery-status notification: the message
+ * intentionally has no envelope sender, so there is no domain to compare against
+ * From and the consistency rules must stay silent. Callers (and the metric) use
+ * this to tell an explicit `<>` apart from a missing or unparseable Return-Path,
+ * since both yield a null domain. Surrounding whitespace is ignored; null input
+ * (a missing header) is not a null reverse-path.
+ */
+export function isNullReversePath(value: string | null): boolean {
+  return value !== null && value.trim() === "<>";
+}
+
+/**
+ * Extract the domain from an envelope-sender value — a Return-Path reverse-path
+ * or an SPF `smtp.mailfrom` property.
+ *
+ * Unlike a From/Reply-To mailbox, an envelope sender may legitimately be a bare
+ * domain (`smtp.mailfrom=example.com`), an addr-spec (`bounce@example.com`), or
+ * an angle-addr (`<bounce@example.com>`), and the null reverse-path `<>` carries
+ * no domain at all. All four are handled here.
+ *
+ * Hardening mirrors the mailbox extractor: RFC 5322 comments are stripped first
+ * so an attacker domain hidden in a comment cannot be pulled out, and a
+ * malformed multi-'@' value yields no domain rather than a fabricated one that
+ * could trigger a spurious consistency signal. The result is normalized
+ * (lower-cased, bracket/trailing-dot stripped, dotless hosts rejected) so casing
+ * and formatting never produce a false mismatch. Returns null when the value is
+ * absent, a null reverse-path, or yields no real dotted domain.
+ */
+export function extractEnvelopeSenderDomain(value: string | null): string | null {
+  if (!value) return null;
+  let candidate = value.trim();
+  if (candidate === "<>") return null;
+
+  candidate = stripComments(candidate).trim();
+  const angleMatch = /<([^<>]*)>/.exec(candidate);
+  if (angleMatch) candidate = (angleMatch[1] ?? "").trim();
+  if (!candidate) return null;
+
+  const atCount = (candidate.match(/@/g) ?? []).length;
+  if (atCount > 1) return null;
+  const domain = atCount === 1 ? candidate.slice(candidate.indexOf("@") + 1) : candidate;
+  if (!domain || /[\s@]/.test(domain)) return null;
+  return normalizeDomain(domain);
+}
+
 export function domainsExactlyMatch(left: string | null, right: string | null): boolean | null {
   if (!left || !right) return null;
   return left === right;

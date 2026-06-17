@@ -19,6 +19,12 @@
       "messageIdDomainMatchesFromDomain": true,
       "replyToDomains": [],
       "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": [],
+      "smtpMailfromDomainMatchesFromDomain": null,
+      "envelopeSenderDomainsAgree": null,
       "authenticationResults": [
         {
           "raw": "mx.example.net; dkim=fail header.d=example.com header.s=sel1",
