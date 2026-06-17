@@ -1,3 +1,6 @@
+import { allDomainsMatch } from "../domains.js";
+import { collectDmarcHeaderFromDomains } from "../metrics.js";
+import { resolveHeaderTrust } from "./trust.js";
 import type { Rule } from "../types.js";
 
 /**
@@ -13,15 +16,20 @@ import type { Rule } from "../types.js";
  * applied to a domain the user never sees. This rule surfaces exactly that
  * parser-differential gap between what was authenticated and what is shown.
  *
- * Pass-and-trust gated by construction: this rule reads dmarcHeaderFromDomains,
- * which the metric layer populates only from DMARC results that passed and only
- * from trusted Authentication-Results headers. A non-pass DMARC authenticates
- * nothing, so its header.from never enters the comparison — a failed DMARC is
+ * Pass-and-trust gated by construction: this rule recomputes its trusted, passing
+ * DMARC header.from set at evaluation time via collectDmarcHeaderFromDomains, so a
+ * non-pass DMARC's header.from never enters the comparison — a failed DMARC is
  * already surfaced by authMethodFailureRule and must not also manufacture a noisy
  * consistency mismatch here. And because header.from is not cryptographic (unlike
  * a DKIM signature), a forge-able untrusted header's value is just the attacker's
  * own assertion of what they "evaluated"; trivially matched or mismatched, it
  * carries no signal, so untrusted headers are excluded entirely.
+ *
+ * Trust is resolved here rather than read from the precomputed metric so the
+ * separated API stays correct: a caller may extract metrics without trust and
+ * declare trustedAuthservIds to runRules, in which case the baked
+ * dmarcHeaderFromDomains metric is empty but resolveHeaderTrust recovers the
+ * trusted headers — matching what analyzeMessage would report for the same input.
  *
  * False-positive note: even a trusted, passing DMARC header.from can legitimately
  * differ from the parsed From in benign ways — the comparison is exact, so a
@@ -40,9 +48,17 @@ import type { Rule } from "../types.js";
 export const dmarcHeaderFromMismatchRule: Rule = {
   key: "dmarc.headerFromMismatch",
   description: "A trusted, passing DMARC header.from domain does not match the visible From domain.",
-  evaluate({ metrics }) {
-    if (metrics.dmarcHeaderFromMatchesFromDomain !== false) return [];
-    const mismatchedDomains = metrics.dmarcHeaderFromDomains.filter(
+  evaluate({ metrics, options }) {
+    // Recompute the trusted, passing header.from set from the headers so a caller
+    // passing trustedAuthservIds to runRules (after extracting metrics without it)
+    // sees the same mismatch analyzeMessage would, instead of the empty set the
+    // baked metric would carry.
+    const dmarcHeaderFromDomains = collectDmarcHeaderFromDomains(
+      metrics.authenticationResults,
+      (header) => resolveHeaderTrust(header, options),
+    );
+    if (allDomainsMatch(metrics.fromDomain, dmarcHeaderFromDomains) !== false) return [];
+    const mismatchedDomains = dmarcHeaderFromDomains.filter(
       (domain) => domain !== metrics.fromDomain,
     );
     return [
@@ -52,7 +68,7 @@ export const dmarcHeaderFromMismatchRule: Rule = {
         message: "DMARC header.from domain differs from the visible From domain.",
         data: {
           fromDomain: metrics.fromDomain,
-          dmarcHeaderFromDomains: metrics.dmarcHeaderFromDomains,
+          dmarcHeaderFromDomains,
           mismatchedDomains,
         },
       },

@@ -4,6 +4,7 @@ import {
   dmarcHeaderFromMismatchRule,
   extractDmarcHeaderFromDomain,
   extractMetrics,
+  runRules,
 } from "../src/index.js";
 import type { AnalyzeInput, AnalyzeResult, Signal } from "../src/index.js";
 import match from "./fixtures/dmarc-headerfrom-match.json" with { type: "json" };
@@ -288,7 +289,7 @@ describe("dmarcHeaderFromMismatchRule — missing/malformed input stays silent",
 });
 
 describe("dmarcHeaderFromMismatchRule — rule in isolation", () => {
-  it("reads only the precomputed metric, emitting nothing when it is not false", () => {
+  it("falls back to baked trust with no override, emitting nothing when From aligns", () => {
     const quiet = extractMetrics(message("Example <a@example.com>", "dmarc=pass header.from=example.com"));
     expect(dmarcHeaderFromMismatchRule.evaluate({ metrics: quiet, options: {} })).toEqual([]);
 
@@ -297,6 +298,53 @@ describe("dmarcHeaderFromMismatchRule — rule in isolation", () => {
 
     const noisy = extractMetrics(message("Example <a@example.com>", "dmarc=pass header.from=evil.test"));
     expect(dmarcHeaderFromMismatchRule.evaluate({ metrics: noisy, options: {} })).toHaveLength(1);
+  });
+});
+
+describe("dmarcHeaderFromMismatchRule — trust declared at rule time (separated API)", () => {
+  // A caller may extract metrics without trust and only declare trustedAuthservIds
+  // when calling runRules. The rule must recompute trust then, matching what
+  // analyzeMessage reports, rather than dropping the header.from baked as untrusted.
+  const input = {
+    headers: {
+      from: "Example <a@example.com>",
+      "message-id": "<id@example.com>",
+      "authentication-results": "mx.example.net; dmarc=pass header.from=evil.test;",
+    },
+  };
+
+  it("recovers a mismatch when trust is passed to runRules after metric extraction", () => {
+    const metrics = extractMetrics(input);
+    // Extracted without trust, so the baked metric drops the untrusted header.from.
+    expect(metrics.dmarcHeaderFromDomains).toEqual([]);
+    expect(metrics.dmarcHeaderFromMatchesFromDomain).toBeNull();
+
+    const signals = runRules(metrics, { trustedAuthservIds: [TRUSTED_ID] });
+    const dmarc = signals.filter((signal) => signal.key === "dmarc.headerFromMismatch");
+    expect(dmarc).toEqual([
+      {
+        key: "dmarc.headerFromMismatch",
+        severity: "low",
+        message: "DMARC header.from domain differs from the visible From domain.",
+        data: {
+          fromDomain: "example.com",
+          dmarcHeaderFromDomains: ["evil.test"],
+          mismatchedDomains: ["evil.test"],
+        },
+      },
+    ]);
+  });
+
+  it("matches what analyzeMessage reports for the same trusted input", () => {
+    const viaSeparated = runRules(extractMetrics(input), { trustedAuthservIds: [TRUSTED_ID] });
+    const viaAnalyze = analyzeMessage({ ...input, options: { trustedAuthservIds: [TRUSTED_ID] } }).signals;
+    const onlyDmarc = (signals: Signal[]) => signals.filter((s) => s.key.startsWith("dmarc."));
+    expect(onlyDmarc(viaSeparated)).toEqual(onlyDmarc(viaAnalyze));
+  });
+
+  it("stays silent when the header.from-bearing authserv-id is still untrusted at rule time", () => {
+    const signals = runRules(extractMetrics(input), { trustedAuthservIds: ["other.example.org"] });
+    expect(signals.filter((s) => s.key === "dmarc.headerFromMismatch")).toEqual([]);
   });
 });
 
