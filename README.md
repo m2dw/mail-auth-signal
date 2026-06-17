@@ -278,6 +278,38 @@ single trusted+passing `header.from` that differs from From is enough to flag
 missing `From`, no trusted+passing DMARC result, or an unparseable `header.from`
 leaves `dmarcHeaderFromMatchesFromDomain` `null` and emits no signal.
 
+## CLI example — stdin scoring
+
+`examples/score-stdin.mjs` reads a raw email from stdin, parses its headers,
+runs `analyzeMessage`, and prints a JSON result with an example caller-side score.
+
+```sh
+cat sample.eml | node examples/score-stdin.mjs
+# with a trusted authserv-id:
+cat sample.eml | node examples/score-stdin.mjs --trusted mx.example.net
+```
+
+Output shape:
+
+```json
+{
+  "score": 9,
+  "severityCounts": { "info": 0, "low": 1, "medium": 0, "high": 1 },
+  "signals": [ … ],
+  "metrics": { … }
+}
+```
+
+**The numeric score and severity weights are an example caller policy, not a
+library standard.** The library returns `signals` and `metrics`; thresholds,
+weights, and allow/block decisions belong to the caller. The weights used in the
+example are `info: 0`, `low: 1`, `medium: 3`, `high: 8`.
+
+Pass `--trusted <authserv-id>` (repeatable) to declare trusted
+`Authentication-Results` sources. Without it, all `Authentication-Results`
+headers are treated as untrusted and authentication-failure signals are
+downgraded to `low` severity.
+
 ## Current status
 
 This repository is in early development. Implemented so far:
