@@ -142,6 +142,29 @@ describe("composite.unauthenticatedFromSpoof", () => {
       compositeSignals(result.signals).map((s) => s.key),
     ).not.toContain("composite.unauthenticatedFromSpoof");
   });
+
+  it("stays silent with no parseable From even when the envelope sender disagrees", () => {
+    // Malformed/system message: no usable From, so nothing is being impersonated.
+    // Return-Path and smtp.mailfrom merely disagree with each other, which fires
+    // envelopeSender.domainDisagreement — a consistency signal that never compares
+    // to From. Without the From guard this would emit a high spoof with
+    // fromDomain:null; the visible-From-spoof premise requires a visible From.
+    const result = analyzeWithComposites({
+      headers: {
+        "message-id": "<id@a.test>",
+        "return-path": "<bounce@a.test>",
+        "authentication-results": `${TRUSTED_ID}; spf=fail smtp.mailfrom=b.test`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.fromDomain).toBeNull();
+    // The envelope-sender disagreement is present as a base consistency signal...
+    expect(result.signals.map((s) => s.key)).toContain("envelopeSender.domainDisagreement");
+    // ...but it must not be escalated to a From-spoof verdict.
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+  });
 });
 
 describe("composite.authenticatedDisplayNameSpoof", () => {

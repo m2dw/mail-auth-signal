@@ -17,6 +17,19 @@ import type { CompositeRule, Signal } from "../../types.js";
  * high-confidence observation.
  *
  * Why these guards (false-positive control):
+ *   - a parseable From domain (metrics.fromDomain !== null): the whole premise is
+ *     a *visible-From* spoof, so there must be a visible From to spoof. Without
+ *     one, the From-comparison consistency signals (returnPath/smtpMailfrom/dkim/
+ *     dmarc/replyTo/messageId mismatch) are all silent — they compare against From
+ *     and report null when it is absent — and the only consistency signal that can
+ *     still fire is envelopeSender.domainDisagreement, which compares Return-Path
+ *     to smtp.mailfrom and never to From. Accepting that as the spoof tell would
+ *     emit a high verdict with fromDomain:null for malformed/system mail whose two
+ *     envelope views merely disagree, with nothing impersonating a visible sender.
+ *     Requiring a From keeps the consistency evidence anchored to it: once From is
+ *     present, an envelope-sender disagreement also implies a Return-Path or
+ *     smtp.mailfrom domain that mismatches From, so a real From-comparison signal
+ *     is always present alongside it.
  *   - trustedHeaderCount > 0: the verdict needs a basis. With no trusted
  *     Authentication-Results header we never evaluated anything, so anyAuthAligned
  *     is vacuously false and a mismatch could be perfectly benign mail we simply
@@ -49,6 +62,12 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
     "The visible From domain has no aligned, trusted authentication and another sender identifier disagrees with it.",
   evaluate({ metrics, signals }): Signal[] {
     const { authentication } = metrics;
+    // A visible-From spoof needs a visible From. With no parseable From domain the
+    // From-comparison consistency signals cannot fire, and the only consistency
+    // signal that can — envelopeSender.domainDisagreement — never compares to From,
+    // so without this guard malformed/system mail with a disagreeing envelope would
+    // emit a high verdict carrying fromDomain:null.
+    if (metrics.fromDomain === null) return [];
     // No trusted header means nothing was actually evaluated; do not manufacture
     // a verdict from an unverifiable message.
     if (authentication.trustedHeaderCount === 0) return [];
