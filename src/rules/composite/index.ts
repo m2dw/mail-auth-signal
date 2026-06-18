@@ -7,10 +7,12 @@ import type {
 import { collectAuthenticationAlignment } from "../../metrics.js";
 import { resolveHeaderTrust } from "../trust.js";
 import { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
+import { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 import { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
 import { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
 
 export { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
+export { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 export { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
 export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
 
@@ -32,6 +34,7 @@ export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfi
  */
 export const defaultCompositeRules: readonly CompositeRule[] = [
   unauthenticatedFromSpoofRule,
+  publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
   alignedAuthenticationConfirmedRule,
 ];

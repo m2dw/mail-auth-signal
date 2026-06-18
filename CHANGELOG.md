@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Added a public mailbox provider catalog and a spoofing candidate signal (issue #47):
+  - Bundled a small, explicit, hand-authored catalog of high-confidence public
+    mailbox provider registrable domains (`gmail.com`/`googlemail.com`,
+    `outlook.com`/`hotmail.com`/`live.com`/`msn.com`,
+    `icloud.com`/`me.com`/`mac.com`, `yahoo.com`/`yahoo.co.jp`, `aol.com`),
+    exported as `defaultPublicMailboxProviders` with the `PublicMailboxProvider`
+    type and a `lookupPublicMailboxProvider(domain, catalog?)` helper. It is
+    owned by this project and is **not** an imported PSL/brand/word list, so it
+    crosses no external-data license boundary.
+  - Added `senderIdentity.fromDomainIsPublicMailboxProvider` and
+    `senderIdentity.publicMailboxProviderId`, populated by matching the From
+    registrable domain (when a `getRegistrableDomain` resolver is supplied, else
+    the exact From domain) against the catalog. Membership is a fact, never a
+    verdict.
+  - Let callers extend or fully replace the catalog via the new
+    `MetricsDependencies.publicMailboxProviders` (kept out of the serializable
+    `AnalyzeInput`, like `getRegistrableDomain`); omitting it uses the built-in.
+  - Added the opt-in `composite.publicMailboxSpoofingCandidate` rule (medium):
+    fires when the visible From is a catalog public-mailbox domain, a trusted
+    header evaluated the message, and no aligned, trusted authentication vouches
+    for it. Because these providers publish enforcing DMARC, missing alignment is
+    the spoof tell on its own. Gated like the other From-spoof composites
+    (trusted sender-auth check required, aligned trusted DMARC pass suppresses),
+    so it cannot be suppressed without real aligned auth nor manufactured against
+    honest mail via a forge-able header. Scoring/policy stays with the caller.
+  - Added focused tests and README documentation; updated the existing
+    sender-identity fixtures for the two new (additive) metric fields.
 - Audited Thunderbird add-on core-logic migration completeness (issue #45):
   - Added `MIGRATION-AUDIT.md`, an explicit source-area inventory classifying
     every add-on core-relevant behavior as *Migrated* (with owning source/tests

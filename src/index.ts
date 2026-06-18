@@ -6,6 +6,10 @@ export {
   computeLexicalStats,
   computeSenderIdentity,
 } from "./senderIdentity.js";
+export {
+  defaultPublicMailboxProviders,
+  lookupPublicMailboxProvider,
+} from "./publicMailboxProviders.js";
 export { normalizeHeaders } from "./normalizeHeaders.js";
 export { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 export {
@@ -37,6 +41,7 @@ export {
   defaultCompositeRules,
   runCompositeRules,
   unauthenticatedFromSpoofRule,
+  publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
   alignedAuthenticationConfirmedRule,
 } from "./rules/composite/index.js";
@@ -59,6 +64,7 @@ export type {
   LexicalStats,
   MessageMetrics,
   MetricsDependencies,
+  PublicMailboxProvider,
   SenderIdentityMetrics,
   SpfResult,
   Rule,

@@ -1,4 +1,5 @@
 import { allDomainsMatch, extractEmbeddedDomains, parseFromMailbox } from "./domains.js";
+import { lookupPublicMailboxProvider } from "./publicMailboxProviders.js";
 import type {
   DisplayNameMetrics,
   DomainParts,
@@ -177,6 +178,7 @@ export function computeSenderIdentity(
   deps?: MetricsDependencies,
 ): SenderIdentityMetrics {
   const getRegistrableDomain = deps?.getRegistrableDomain;
+  const publicMailboxProviders = deps?.publicMailboxProviders;
   const parsed = parseFromMailbox(fromValue);
 
   const displayText = parsed.displayName;
@@ -205,6 +207,20 @@ export function computeSenderIdentity(
     return fromRegistrable === messageIdRegistrable;
   })();
 
+  // Public mailbox provider membership of the visible From. Catalog entries are
+  // registrable domains, so prefer matching the From *registrable* domain when a
+  // PSL resolver is supplied (so `mail.gmail.com` still resolves to "google"),
+  // then fall back to the bare From domain (the common case: From is already the
+  // registrable domain). Null From belongs to no provider.
+  const publicMailboxProviderId = ((): string | null => {
+    if (fromDomain === null) return null;
+    const fromRegistrable = getRegistrableDomain ? getRegistrableDomain(fromDomain) : null;
+    return (
+      lookupPublicMailboxProvider(fromRegistrable, publicMailboxProviders) ??
+      lookupPublicMailboxProvider(fromDomain, publicMailboxProviders)
+    );
+  })();
+
   return {
     displayName,
     localPart,
@@ -215,5 +231,7 @@ export function computeSenderIdentity(
     messageIdDomainParts:
       messageIdDomain !== null ? computeDomainParts(messageIdDomain, getRegistrableDomain) : null,
     messageIdRegistrableDomainMatchesFromDomain,
+    fromDomainIsPublicMailboxProvider: publicMailboxProviderId !== null,
+    publicMailboxProviderId,
   };
 }
