@@ -46,6 +46,19 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     authenticated as that domain — so a forwarder that fails SPF but keeps an
  *     aligned DKIM signature does not trip this. Only the genuinely
  *     unauthenticated From reaches here.
+ *   - no aligned trusted DMARC pass: a trusted Authentication-Results header can
+ *     report only an aggregate DMARC verdict (`dmarc=pass header.from=brand.example`)
+ *     with no SPF/DKIM method lines, which leaves anyAuthAligned vacuously false even
+ *     though the trusted verifier confirmed DMARC — and therefore an aligned SPF or
+ *     DKIM identifier — passed for the visible From. Treating that as unauthenticated
+ *     would let any benign identifier mismatch (e.g. a different Message-ID host) emit
+ *     a high spoof on mail the verifier explicitly vouched for. A trusted DMARC pass
+ *     whose header.from equals the visible From therefore also short-circuits the rule.
+ *     Only a pass for that exact From counts: a trusted pass for a *different*
+ *     header.from is itself a spoof tell (dmarc.headerFromMismatch), not authentication
+ *     of the visible From, and an untrusted DMARC pass is forge-able. An attacker
+ *     spoofing a domain they do not control cannot make the trusted verifier emit an
+ *     aligned DMARC pass for it, so this suppression is not attacker-triggerable.
  *   - at least one *authoritative* divergent identifier: a misconfigured-but-honest
  *     sender whose own identifiers all still name the From domain (it just failed to
  *     authenticate) produces auth-failure signals but no consistency mismatch, so it
@@ -99,6 +112,22 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
     if (!hasTrustedSenderAuth) return [];
     // An aligned, trusted, passing identifier authenticates the From domain.
     if (authentication.anyAuthAligned !== false) return [];
+    // A trusted verifier's DMARC pass for the *visible* From domain also
+    // authenticates that From, even when the same header omits the SPF/DKIM method
+    // lines anyAuthAligned is computed from (a bare `dmarc=pass header.from=From`
+    // aggregate leaves anyAuthAligned vacuously false). DMARC passes only when an
+    // aligned SPF or DKIM identifier satisfied the From domain's policy, so this is
+    // not an unauthenticated From. Only a pass whose header.from equals the visible
+    // From counts — a trusted pass for a different header.from is the
+    // dmarc.headerFromMismatch spoof tell, and an untrusted pass is forge-able.
+    const hasAlignedTrustedDmarcPass = authentication.dmarcResults.some(
+      (result) =>
+        result.trusted &&
+        result.result === "pass" &&
+        result.headerFrom !== null &&
+        result.headerFrom === fromDomain,
+    );
+    if (hasAlignedTrustedDmarcPass) return [];
 
     const consistencyKeys = signals
       .filter((signal) => signal.category === "consistency")
@@ -144,12 +173,35 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
       return [];
     }
 
-    const authFailureKeys = signals
-      .filter((signal) => signal.category === "auth-failure")
+    // The trace must name only the lower-layer signals this rule actually accepted
+    // as evidence, not every signal of the right category. A forge-able untrusted
+    // Authentication-Results header can produce a base auth-failure (its own claimed
+    // fail) or consistency mismatch (e.g. dkim.domainMismatch from an injected
+    // `dkim=pass header.d=evil.test`) that the gates above explicitly rejected;
+    // reporting those keys would point the rationale at signals that did not justify
+    // the high composite, misleading a caller displaying or auditing it.
+    //
+    // Auth-failure: keep only trusted failures. An untrusted failure is the
+    // attacker's own assertion and never part of the basis (the unauthenticated leg
+    // rests on a trusted sender-auth check, not on a forge-able one).
+    const trustedAuthFailureKeys = signals
+      .filter((signal) => signal.category === "auth-failure" && signal.data?.trusted === true)
       .map((signal) => signal.key);
+    // Consistency: keep only the mismatches that qualified as authoritative evidence
+    // above — the non-AR-forgeable message-header / DMARC keys, plus the
+    // trusted-header SPF/DKIM mismatches (their base signals are derived from every
+    // header, so include them only when a *trusted* result actually disagreed).
+    const acceptedConsistencyKeys = consistencyKeys.filter(
+      (key) =>
+        authoritativeConsistencyKeys.has(key) ||
+        (key === "smtpMailfrom.domainMismatch" && hasTrustedSpfMismatch) ||
+        (key === "dkim.domainMismatch" && hasTrustedDkimMismatch),
+    );
     // Deduplicate while preserving first-seen order so the contributing list is
     // stable across messages that repeat a key (e.g. several failed methods).
-    const contributingSignals = [...new Set([...authFailureKeys, ...consistencyKeys])];
+    const contributingSignals = [
+      ...new Set([...trustedAuthFailureKeys, ...acceptedConsistencyKeys]),
+    ];
 
     return [
       {

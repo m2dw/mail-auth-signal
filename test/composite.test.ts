@@ -254,6 +254,79 @@ describe("composite.unauthenticatedFromSpoof", () => {
       compositeSignals(result.signals).map((s) => s.key),
     ).not.toContain("composite.unauthenticatedFromSpoof");
   });
+
+  it("stays silent on a trusted aggregate DMARC pass for the From despite an identifier mismatch", () => {
+    // The trusted verifier reports only an aggregate `dmarc=pass header.from=example.com`
+    // (no SPF/DKIM method lines), so anyAuthAligned is vacuously false. A different
+    // Message-ID host is a benign mismatch; because the trusted verifier vouched DMARC
+    // passed for the visible From, this must not escalate to an unauthenticated spoof.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<id@mailer.example.net>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=example.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(result.metrics.authentication.dmarcPass).toBe(true);
+    // The Message-ID mismatch is present as a base consistency signal...
+    expect(result.signals.map((s) => s.key)).toContain("messageId.domainMismatch");
+    // ...but the trusted aligned DMARC pass authenticates the From, so no composite.
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("still fires when a trusted DMARC pass is for a different header.from than the visible From", () => {
+    // A trusted DMARC pass whose header.from is not the visible From is itself a spoof
+    // tell, not authentication of the From. With the visible From unauthenticated and an
+    // authoritative Message-ID mismatch, the composite must still fire.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<spoof@evil.test>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=evil.test`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("omits forged untrusted-header signals from contributingSignals", () => {
+    // An authoritative Message-ID mismatch triggers the composite. Alongside it, an
+    // untrusted forged header injects `dkim=pass header.d=evil.test` (a forge-able
+    // dkim.domainMismatch) and claims its own auth failure. Neither was accepted as
+    // evidence, so neither key may appear in the rationale trace.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<spoof@evil.test>",
+        "authentication-results": [
+          `${TRUSTED_ID}; dmarc=fail header.from=example.com`,
+          "relay.evil.test; dkim=pass header.d=evil.test; spf=fail smtp.mailfrom=evil.test",
+        ],
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    const signal = compositeSignals(result.signals).find(
+      (s) => s.key === "composite.unauthenticatedFromSpoof",
+    );
+    expect(signal).toBeDefined();
+    const contributing = signal?.data?.contributingSignals as string[];
+    // The authoritative message-header mismatch and the trusted DMARC failure justified it.
+    expect(contributing).toContain("messageId.domainMismatch");
+    expect(contributing).toContain("auth.method.failure");
+    // The forge-able dkim.domainMismatch from the untrusted header is present as a base
+    // signal but was rejected as evidence, so it must not be traced as a contributor.
+    expect(result.signals.map((s) => s.key)).toContain("dkim.domainMismatch");
+    expect(contributing).not.toContain("dkim.domainMismatch");
+    // The untrusted smtp.mailfrom mismatch is likewise excluded.
+    expect(contributing).not.toContain("smtpMailfrom.domainMismatch");
+  });
 });
 
 describe("composite.authenticatedDisplayNameSpoof", () => {
