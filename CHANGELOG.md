@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.3.0 — 2026-06-18
+
+- Exported `computeLexicalHeuristics(token)` and the `LexicalHeuristics` type (issue #41):
+  - Added data-free, policy-neutral lexical shape metrics: Shannon entropy,
+    normalized entropy, vowel ratio, max consonant run, max repeated-character
+    run, unique character ratio, and letter/digit transition count.
+  - Kept the helper outside `analyzeMessage` output so callers own thresholds,
+    scoring, and actions. No word lists, brand dictionaries, language corpora,
+    n-gram tables, PSL data, or other licensed datasets are bundled.
+  - Added README guidance and focused fixture/invariant tests.
+
 ## v0.2.0 — 2026-06-18
 
 - Ported the Layer 4 composite rule framework as reusable signal rules (issue #35):
