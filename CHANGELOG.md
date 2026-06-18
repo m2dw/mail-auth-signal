@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Audited Thunderbird add-on core-logic migration completeness (issue #45):
+  - Added `MIGRATION-AUDIT.md`, an explicit source-area inventory classifying
+    every add-on core-relevant behavior as *Migrated* (with owning source/tests
+    named), *Not core* (caller-owned: UI, notifications, mailbox actions,
+    storage, Thunderbird/WebExtension APIs, network/DNS, scoring policy, bundled
+    PSL/word-list data), *Needs migration*, or *Needs decision*. No behavior is
+    classified *Needs migration*; the open items are a confirmatory re-diff
+    against the add-on and the standing PSL/data license boundary.
+  - Replaced the README's ambiguous "early development" / "remaining rules will
+    be migrated incrementally" wording (which implied both an incomplete and a
+    completed migration) with a "Migration status" section stating that the
+    currently identified reusable core migration is complete and future add-on
+    logic is evaluated case by case. No source or behavior change.
+
 ## v0.3.0 — 2026-06-18
 
 - Exported `computeLexicalHeuristics(token)` and the `LexicalHeuristics` type (issue #41):

@@ -6,7 +6,7 @@
 
 Mail Auth Signal is a lightweight sender-risk signal engine for email authentication results and header consistency analysis.
 
-It is intended to be the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
+It is the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project; the reusable detection logic currently identified in that add-on has been migrated here (see [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md) and [Migration status](#migration-status)). The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
 
 ## Goals
 
@@ -61,7 +61,8 @@ console.log(result.signals);
 
 `analyzeMessage(input: AnalyzeInput, rules?: readonly Rule[], deps?: MetricsDependencies, compositeRules?: readonly CompositeRule[]): AnalyzeResult`
 is the primary public analysis entry point. Internally it runs in separable halves
-so detection rules can be migrated incrementally:
+so detection rules stay independently composable — callers can pass a subset, add
+their own, or layer in any future rule without re-parsing headers:
 
 ```ts
 import { extractMetrics, runRules, defaultRules, analyzeMessage } from "mail-auth-signal";
@@ -104,11 +105,11 @@ const signals = runRules(metrics, input.options, defaultRules); // interpretatio
 The core is pure: it reads no globals, no environment variables, and performs no I/O. All context flows in through `AnalyzeOptions`:
 
 - `trustedAuthservIds` — the authserv-ids the caller's mail system stamps on inbound mail. The caller is responsible for this list; the core has no built-in opinion.
-- `context` — an open-ended serializable bag for future caller-provided policy context (per-sender overrides, allow-listed domains, metadata). Currently ignored by all rules; reserved for rule migration from the Thunderbird add-on.
+- `context` — an open-ended serializable bag for future caller-provided policy context (per-sender overrides, allow-listed domains, metadata). Currently ignored by all rules; reserved as a forward-compatible extension point for caller-supplied policy context.
 
 ## Writing a rule
 
-A `Rule` is the unit of incremental migration. Each detection rule is a pure
+A `Rule` is the unit of extension. Each detection rule is a pure
 function of a `RuleContext` (`{ metrics, options }`) that returns zero or more
 `Signal`s — never a score or an allow/block decision. A rule that needs a new
 fact adds it to metric extraction rather than re-parsing headers, keeping
@@ -514,12 +515,21 @@ Pass `--trusted <authserv-id>` (repeatable) to declare trusted
 headers are treated as untrusted and authentication-failure signals are
 downgraded to `low` severity.
 
-## Current status
+## Migration status
 
-This repository is in early development. Implemented so far:
+The reusable detection core currently identified in the Thunderbird Auth Results
+Filter add-on has been migrated into this package. The migration was audited
+source-area by source-area in [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md), which
+classifies every add-on behavior as *Migrated*, *Not core* (caller-owned), *Needs
+migration*, or *Needs decision*. No behavior is classified *Needs migration*: the
+currently identified reusable core migration is complete, and future add-on logic
+will be evaluated case by case against that same classification.
+
+Migrated core (pure parsing, metrics, signals — no UI, storage, mailbox actions,
+network, or scoring policy):
 
 - Header normalization
-- Basic mailbox/domain extraction
+- Mailbox/domain extraction
 - `Authentication-Results` method/result extraction
 - Trusted authserv-id matching, with shared trust resolution for all AR rules
 - Trust-aware Authentication-Results failure signals (SPF/DKIM/DMARC)
@@ -531,8 +541,14 @@ This repository is in early development. Implemented so far:
 - Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
 - Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and an optional registrable-domain comparison via a caller-supplied PSL resolver (no list bundled)
 - Richer lexical heuristics helper (`computeLexicalHeuristics`): entropy, normalized entropy, vowel ratio, max consonant/repeated runs, unique-character ratio, and letter/digit transitions — data-free and policy-neutral
+- Composite (Layer 4) signals combining the base layers (opt-in)
 
-The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
+Add-on behavior that is intentionally **not** migrated — UI, notifications,
+mailbox/folder actions, storage, Thunderbird/WebExtension APIs, network/DNS, local
+scoring thresholds, and bundled PSL/brand/word-list data — stays caller-owned by
+the boundary in [`AGENTS.md`](./AGENTS.md). The only open items in the audit are a
+confirmatory re-diff against the add-on and the standing PSL/data license boundary,
+neither of which is a pending core port.
 
 ## License
 
