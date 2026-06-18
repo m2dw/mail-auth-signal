@@ -1,5 +1,5 @@
 export { analyzeMessage } from "./analyze.js";
-export { extractMetrics } from "./metrics.js";
+export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
 export { normalizeHeaders } from "./normalizeHeaders.js";
 export { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 export {
@@ -29,11 +29,15 @@ export type {
   AnalyzeInput,
   AnalyzeOptions,
   AnalyzeResult,
+  AuthenticationAlignment,
   AuthenticationMethodResult,
   AuthenticationResultsHeader,
+  DkimResult,
+  DmarcResult,
   HeaderInput,
   HeaderLine,
   MessageMetrics,
+  SpfResult,
   Rule,
   RuleContext,
   RuleScope,

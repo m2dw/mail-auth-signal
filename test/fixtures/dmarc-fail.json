@@ -26,6 +26,23 @@
       "dkimDomainMatchesFromDomain": null,
       "dmarcHeaderFromDomains": [],
       "dmarcHeaderFromMatchesFromDomain": null,
+      "authentication": {
+        "trustedHeaderCount": 0,
+        "untrustedHeaderCount": 1,
+        "dmarcResults": [
+          { "result": "fail", "headerFrom": "example.com", "trusted": false }
+        ],
+        "spfResults": [
+          { "result": "pass", "smtpMailfrom": "example.com", "trusted": false }
+        ],
+        "dkimResults": [],
+        "spfAlignedWithFrom": null,
+        "dkimAlignedWithFrom": null,
+        "anyAlignedSpfPass": false,
+        "anyAlignedDkimPass": false,
+        "dmarcPass": false,
+        "anyAuthAligned": false
+      },
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=fail header.from=example.com; spf=pass smtp.mailfrom=example.com",

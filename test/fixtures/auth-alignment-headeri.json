@@ -1,11 +1,11 @@
 {
-  "description": "A message carries two passing DKIM signatures: one aligned with From (header.d=example.com) and one for attacker-controlled evil.test. A single divergent signing domain is enough to flag, so dkimDomains is [example.com, evil.test], dkimDomainMatchesFromDomain is false, and one low-severity dkim.domainMismatch signal is emitted carrying only the mismatching subset (evil.test). Multiple signatures are routine for legitimate mail (author domain plus forwarder/list), which is why the severity stays low and the caller is expected to note that one signature did align.",
+  "description": "Authentication + alignment metrics on a trusted, fully From-aligned message that also carries a DKIM header.i (AUID) and a second, third-party DKIM signature. Layer 1 records every DMARC/SPF/DKIM result with its identifiers (including the normalized header.i domain news.example.com) and trust tag; Layer 2 shows the aligned author-domain signature makes anyAlignedDkimPass true while the extra mailer.test signature keeps dkimAlignedWithFrom false (any-vs-all alignment). The mailer.test signing domain also drives the one dkim.domainMismatch consistency hint; everything else aligns.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
       "message-id": "<abc123@example.com>",
       "authentication-results": [
-        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com; dkim=pass header.d=evil.test"
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com header.i=@news.example.com; dkim=pass header.d=mailer.test"
       ]
     },
     "options": {
@@ -25,7 +25,7 @@
       "smtpMailfromDomains": ["example.com"],
       "smtpMailfromDomainMatchesFromDomain": true,
       "envelopeSenderDomainsAgree": null,
-      "dkimDomains": ["example.com", "evil.test"],
+      "dkimDomains": ["example.com", "mailer.test"],
       "dkimDomainMatchesFromDomain": false,
       "dmarcHeaderFromDomains": ["example.com"],
       "dmarcHeaderFromMatchesFromDomain": true,
@@ -39,8 +39,8 @@
           { "result": "pass", "smtpMailfrom": "example.com", "trusted": true }
         ],
         "dkimResults": [
-          { "result": "pass", "headerD": "example.com", "headerI": null, "trusted": true },
-          { "result": "pass", "headerD": "evil.test", "headerI": null, "trusted": true }
+          { "result": "pass", "headerD": "example.com", "headerI": "news.example.com", "trusted": true },
+          { "result": "pass", "headerD": "mailer.test", "headerI": null, "trusted": true }
         ],
         "spfAlignedWithFrom": true,
         "dkimAlignedWithFrom": false,
@@ -51,14 +51,14 @@
       },
       "authenticationResults": [
         {
-          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com; dkim=pass header.d=evil.test",
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com header.i=@news.example.com; dkim=pass header.d=mailer.test",
           "authservId": "mx.example.net",
           "trusted": true,
           "methods": [
             { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
             { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
-            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } },
-            { "method": "dkim", "result": "pass", "properties": { "header.d": "evil.test" } }
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com", "header.i": "@news.example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "mailer.test" } }
           ]
         }
       ]
@@ -71,8 +71,8 @@
         "message": "DKIM header.d signing domain differs from the From domain.",
         "data": {
           "fromDomain": "example.com",
-          "dkimDomains": ["example.com", "evil.test"],
-          "mismatchedDomains": ["evil.test"]
+          "dkimDomains": ["example.com", "mailer.test"],
+          "mismatchedDomains": ["mailer.test"]
         }
       }
     ]

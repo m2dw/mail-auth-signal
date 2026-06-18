@@ -27,6 +27,25 @@
       "dkimDomainMatchesFromDomain": true,
       "dmarcHeaderFromDomains": [],
       "dmarcHeaderFromMatchesFromDomain": null,
+      "authentication": {
+        "trustedHeaderCount": 0,
+        "untrustedHeaderCount": 1,
+        "dmarcResults": [
+          { "result": "pass", "headerFrom": "example.com", "trusted": false }
+        ],
+        "spfResults": [
+          { "result": "pass", "smtpMailfrom": "example.com", "trusted": false }
+        ],
+        "dkimResults": [
+          { "result": "pass", "headerD": "example.com", "headerI": null, "trusted": false }
+        ],
+        "spfAlignedWithFrom": null,
+        "dkimAlignedWithFrom": null,
+        "anyAlignedSpfPass": false,
+        "anyAlignedDkimPass": false,
+        "dmarcPass": false,
+        "anyAuthAligned": false
+      },
       "authenticationResults": [
         {
           "raw": "relay.unknown.test; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
