@@ -59,8 +59,8 @@ console.log(result.signals);
 
 ## API boundary
 
-`analyzeMessage(input: AnalyzeInput, rules?: readonly Rule[]): AnalyzeResult` is the
-primary public analysis entry point. Internally it runs in two separable halves
+`analyzeMessage(input: AnalyzeInput, rules?: readonly Rule[], deps?: MetricsDependencies, compositeRules?: readonly CompositeRule[]): AnalyzeResult`
+is the primary public analysis entry point. Internally it runs in separable halves
 so detection rules can be migrated incrementally:
 
 ```ts
@@ -75,8 +75,12 @@ const signals = runRules(metrics, input.options, defaultRules); // interpretatio
   facts (`MessageMetrics`) with no signals attached.
 - `runRules(metrics, options?, rules?)` — evaluates a rule set over already-extracted
   metrics. Lets callers cache or transport metrics and evaluate rules separately.
-- `defaultRules` — the built-in rule set. Callers pass their own array (a subset of
-  `defaultRules`, or custom `Rule`s) as the second argument to `analyzeMessage`.
+- `defaultRules` — the built-in per-metric rule set. Callers pass their own array (a
+  subset of `defaultRules`, or custom `Rule`s) as the second argument to `analyzeMessage`.
+- `defaultCompositeRules` / `runCompositeRules(...)` — the opt-in Layer 4 composite
+  rules, which combine base signals into higher-confidence observations. They are
+  **off by default**; pass them as the fourth argument to `analyzeMessage` to enable
+  them. See [Composite (Layer 4) signals](#composite-layer-4-signals).
 
 **What belongs in this library (core)**
 
@@ -146,6 +150,7 @@ mismatch:
 | `trust` | An `Authentication-Results` header came from an untrusted authserv-id. | `auth.results.untrusted` |
 | `auth-failure` | An SPF/DKIM/DMARC method returned a failing or error result. | `auth.method.failure` |
 | `consistency` | Two domains that should agree do not. | `messageId.domainMismatch`, `replyTo.domainMismatch`, `returnPath.domainMismatch`, `smtpMailfrom.domainMismatch`, `dkim.domainMismatch`, `dmarc.headerFromMismatch`, `envelopeSender.domainDisagreement` |
+| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.authenticatedDisplayNameSpoof`, `composite.alignedAuthenticationConfirmed` |
 
 Two conventions keep the surface coherent:
 
@@ -281,6 +286,45 @@ single trusted+passing `header.from` that differs from From is enough to flag
 (the `mismatchedDomains` subset is reported). Missing context stays silent: a
 missing `From`, no trusted+passing DMARC result, or an unparseable `header.from`
 leaves `dmarcHeaderFromMatchesFromDomain` `null` and emits no signal.
+
+### Composite (Layer 4) signals
+
+The base rules above each read a single metric. A **composite rule** reads both
+the metrics and the base signals already produced for the message, so it can
+combine several lower-layer outcomes into one higher-confidence observation — the
+reusable port of the Thunderbird add-on's composite detection layer, with one
+boundary change: where the add-on mapped a composite match onto a Thunderbird
+action, a composite here emits only a structured signal (category `composite`)
+whose `data.contributingSignals` names the lower-layer signal keys that justified
+it. Thresholds and actions stay with the caller.
+
+Composites are an **opt-in layer**. `analyzeMessage` emits only base signals
+unless a caller passes composite rules as the optional fourth argument; the
+default output is unchanged:
+
+```ts
+import { analyzeMessage, defaultRules, defaultCompositeRules } from "mail-auth-signal";
+
+// Base layer only (default):
+const base = analyzeMessage(input);
+// Base layer plus the Layer 4 composites:
+const full = analyzeMessage(input, defaultRules, undefined, defaultCompositeRules);
+```
+
+`runCompositeRules(metrics, baseSignals, options?, compositeRules?)` runs them over
+already-extracted metrics and the base signals those metrics produced (pass base
+signals computed under the same `options`, exactly as `analyzeMessage` does).
+
+| Signal | Severity | Fires when | Attacker model / guard |
+|---|---|---|---|
+| `composite.unauthenticatedFromSpoof` | high | A trusted header evaluated the message, **no** aligned authentication vouches for the From domain (`anyAuthAligned === false`), **and** at least one base consistency signal disagrees with From. | Direct domain impersonation. Combines "From is unauthenticated" with "an identifier disagrees". Stays silent on unevaluable messages (no trusted header) and honest auth misconfigurations (no identifier mismatch). The only way to suppress it is to actually authenticate the From domain. |
+| `composite.authenticatedDisplayNameSpoof` | medium | The message authenticates and aligns for its From (`anyAuthAligned === true`) **and** the display name addresses a different domain (`displayName.containsEmail && embeddedDomainMatchesFromDomain === false`). | Authenticated lookalike with a borrowed display name (`From: "security@paypal.com" <alerts@authed.example>`) — the case a pure auth/Junk filter waves through. The signal points at the attacker's own message, never the impersonated brand. |
+| `composite.alignedAuthenticationConfirmed` | info | A trusted header gives aligned, passing authentication for the From **and** there is no base `auth-failure` or `consistency` signal and no misleading display name. | **False-positive mitigation.** The single positive marker a caller needs to confidently lower a score. It gates on *real* aligned authentication for the visible From — which a spoofer of another domain cannot produce — and withholds on any conflicting signal, so it cannot be used to launder a forgery. |
+
+`composite.alignedAuthenticationConfirmed` is the only rule in the package that
+*reduces* suspicion, so its guard is deliberately strict and documented inline in
+`src/rules/composite/alignedAuthenticationConfirmed.ts`: it is the absence of risk
+(severity `info`), never an instruction to deliver or allow anything.
 
 ## Authentication & alignment metrics
 

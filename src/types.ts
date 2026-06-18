@@ -36,14 +36,26 @@ export type SignalSeverity = "info" | "low" | "medium" | "high";
  *                     failing or error result.
  *   - "consistency":  two header-derived domains that should agree do not — a
  *                     domain-consistency mismatch.
+ *   - "composite":    a higher-layer observation derived by combining several
+ *                     lower-layer facts/signals (auth + consistency + identity)
+ *                     rather than a single metric. A composite signal is still an
+ *                     observation, never a verdict; it names the lower-layer
+ *                     signals that fed it in `data.contributingSignals` so a
+ *                     caller can trace it back to its constituents.
  *
  * Malformed input is deliberately not a category: the rules stay silent on
  * unparseable input rather than emit a low-confidence signal, so malformed
  * input surfaces as the absence of a signal, never as a category of one. This
- * keeps the four distinctions the surface must draw — absence, malformed,
- * auth failure, and consistency mismatch — from collapsing into one key shape.
+ * keeps the four base distinctions the surface must draw — absence, malformed,
+ * auth failure, and consistency mismatch — from collapsing into one key shape,
+ * with composite layered on top as an explicitly cross-cutting fifth.
  */
-export type SignalCategory = "absence" | "trust" | "auth-failure" | "consistency";
+export type SignalCategory =
+  | "absence"
+  | "trust"
+  | "auth-failure"
+  | "consistency"
+  | "composite";
 
 /**
  * A keyed, severity-tagged observation produced by the core.
@@ -570,4 +582,71 @@ export type Rule = {
   description?: string;
   /** Derive zero or more signals from already-extracted facts. */
   evaluate(context: RuleContext): Signal[];
+};
+
+/**
+ * Read-only input handed to every CompositeRule (the Layer 4 framework).
+ *
+ * A composite rule differs from a base Rule in one way: besides the extracted
+ * metrics, it also receives the `signals` the base rules already produced for
+ * this message, so it can reason over a *combination* of lower-layer outcomes
+ * (an authentication failure plus a consistency mismatch plus an identity
+ * shape) instead of a single metric. This is the whole point of the composite
+ * layer — it composes facts that individually are only hints into a single,
+ * higher-confidence observation, while staying a pure function of its input.
+ *
+ *   - metrics: facts produced by extractMetrics, with the `authentication`
+ *     projection recomputed for the current options' trust (so anyAuthAligned,
+ *     dmarcPass, and the per-method result lists reflect rule-time trust, not
+ *     the trust baked at extraction). Mirrors what message-scoped base rules see.
+ *   - signals: the base signals already produced for this message, in emission
+ *     order. Read-only — a composite reads them but never mutates them.
+ *   - options: the caller-provided context (trustedAuthservIds and the
+ *     open-ended `context` bag).
+ *
+ * Because trust drives whether a forged header is believed at all, callers that
+ * use runCompositeRules directly must pass `signals` produced under the same
+ * options, exactly as analyzeMessage does — otherwise a composite could read a
+ * spoof's self-stamped header as authenticated.
+ */
+export type CompositeRuleContext = {
+  readonly metrics: MessageMetrics;
+  readonly signals: readonly Signal[];
+  readonly options: AnalyzeOptions;
+};
+
+/**
+ * A Layer 4 composite detection rule.
+ *
+ * Composite rules are the reusable port of the Thunderbird add-on's composite
+ * detection layer, with one deliberate boundary change: where the add-on mapped
+ * a composite match onto a Thunderbird action (move to Junk, prompt the user),
+ * a CompositeRule emits only a structured Signal whose `data.contributingSignals`
+ * names the lower-layer signal keys that justified it. The action/threshold
+ * decision stays entirely with the caller, same as for base rules.
+ *
+ * Like a Rule, a CompositeRule is code, not data: it travels as a separate
+ * argument to analyzeMessage / runCompositeRules and never inside the
+ * serializable AnalyzeInput, and given the same context it must return the same
+ * signals with no I/O, globals, or randomness.
+ *
+ * Boundary contract:
+ *   - evaluate returns zero or more Signals (category "composite") describing a
+ *     combined observation only.
+ *   - A composite must not emit an allow/block/move/notify decision or a numeric
+ *     score; thresholds and policy belong to the caller.
+ *   - A composite that *lowers* suspicion (a false-positive mitigation) must gate
+ *     on conditions an attacker spoofing someone else's domain cannot satisfy
+ *     (real aligned authentication), and must document that guard.
+ */
+export type CompositeRule = {
+  /**
+   * Stable identifier for the composite rule. Distinct from the signal `key`s it
+   * emits; lets callers select, disable, or document individual composites.
+   */
+  key: string;
+  /** Optional human-readable description of what the composite detects. */
+  description?: string;
+  /** Derive zero or more composite signals from metrics plus base signals. */
+  evaluate(context: CompositeRuleContext): Signal[];
 };

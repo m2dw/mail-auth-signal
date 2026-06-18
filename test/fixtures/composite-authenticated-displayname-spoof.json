@@ -1,0 +1,110 @@
+{
+  "description": "Composite Layer 4: an authenticated lookalike with a borrowed display name. The message authenticates cleanly for its real From domain example.com (DMARC/SPF/DKIM all pass and align), so the base layer emits no signal at all — yet the display name spells an address at a different brand (\"security@paypal.com\"). The composite layer combines 'anyAuthAligned is true' with 'the display name addresses a domain other than From' into a medium composite.authenticatedDisplayNameSpoof, the case a pure auth/Junk filter would wave through. The benign affirmation is withheld because the display name is misleading.",
+  "input": {
+    "headers": {
+      "from": "\"security@paypal.com\" <alerts@example.com>",
+      "message-id": "<id@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": [],
+      "replyToDomainMatchesFromDomain": null,
+      "returnPathDomain": null,
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": null,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": null,
+      "dkimDomains": ["example.com"],
+      "dkimDomainMatchesFromDomain": true,
+      "dmarcHeaderFromDomains": ["example.com"],
+      "dmarcHeaderFromMatchesFromDomain": true,
+      "authentication": {
+        "trustedHeaderCount": 1,
+        "untrustedHeaderCount": 0,
+        "dmarcResults": [
+          { "result": "pass", "headerFrom": "example.com", "trusted": true }
+        ],
+        "spfResults": [
+          { "result": "pass", "smtpMailfrom": "example.com", "trusted": true }
+        ],
+        "dkimResults": [
+          { "result": "pass", "headerD": "example.com", "headerI": null, "trusted": true }
+        ],
+        "spfAlignedWithFrom": true,
+        "dkimAlignedWithFrom": true,
+        "anyAlignedSpfPass": true,
+        "anyAlignedDkimPass": true,
+        "dmarcPass": true,
+        "anyAuthAligned": true
+      },
+      "senderIdentity": {
+        "displayName": {
+          "present": true,
+          "text": "security@paypal.com",
+          "length": 19,
+          "hasNonAscii": false,
+          "containsEmail": true,
+          "embeddedDomains": ["paypal.com"],
+          "embeddedDomainMatchesFromDomain": false
+        },
+        "localPart": "alerts",
+        "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdRegistrableDomainMatchesFromDomain": null
+      },
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "composite.authenticatedDisplayNameSpoof",
+        "category": "composite",
+        "severity": "medium",
+        "message": "Authenticated message's display name addresses a domain other than its From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "embeddedDomains": ["paypal.com"],
+          "mismatchedDomains": ["paypal.com"],
+          "contributingSignals": []
+        }
+      }
+    ]
+  }
+}

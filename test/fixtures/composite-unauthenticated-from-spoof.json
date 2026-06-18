@@ -1,0 +1,201 @@
+{
+  "description": "Composite Layer 4: a direct domain spoof the message cannot authenticate. From claims example.com, but no aligned trusted SPF/DKIM vouches for it (DMARC/SPF/DKIM all fail) and Message-ID, Reply-To, Return-Path, and smtp.mailfrom all point at evil.test. The base layer emits the three auth.method.failure signals and the four From-consistency mismatches; the composite layer then combines 'no aligned authentication' with 'an identifier disagrees with From' into a single high-severity composite.unauthenticatedFromSpoof, naming the lower-layer signal keys that justified it in contributingSignals (the repeated auth.method.failure key deduplicated).",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<spoof@evil.test>",
+      "reply-to": "<reply@evil.test>",
+      "return-path": "<bounce@evil.test>",
+      "authentication-results": [
+        "mx.example.net; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=evil.test; dkim=fail header.d=evil.test"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "evil.test",
+      "messageIdDomainMatchesFromDomain": false,
+      "replyToDomains": ["evil.test"],
+      "replyToDomainMatchesFromDomain": false,
+      "returnPathDomain": "evil.test",
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": false,
+      "smtpMailfromDomains": ["evil.test"],
+      "smtpMailfromDomainMatchesFromDomain": false,
+      "envelopeSenderDomainsAgree": true,
+      "dkimDomains": [],
+      "dkimDomainMatchesFromDomain": null,
+      "dmarcHeaderFromDomains": [],
+      "dmarcHeaderFromMatchesFromDomain": null,
+      "authentication": {
+        "trustedHeaderCount": 1,
+        "untrustedHeaderCount": 0,
+        "dmarcResults": [
+          { "result": "fail", "headerFrom": "example.com", "trusted": true }
+        ],
+        "spfResults": [
+          { "result": "fail", "smtpMailfrom": "evil.test", "trusted": true }
+        ],
+        "dkimResults": [
+          { "result": "fail", "headerD": "evil.test", "headerI": null, "trusted": true }
+        ],
+        "spfAlignedWithFrom": null,
+        "dkimAlignedWithFrom": null,
+        "anyAlignedSpfPass": false,
+        "anyAlignedDkimPass": false,
+        "dmarcPass": false,
+        "anyAuthAligned": false
+      },
+      "senderIdentity": {
+        "displayName": {
+          "present": true,
+          "text": "Example Sender",
+          "length": 14,
+          "hasNonAscii": false,
+          "containsEmail": false,
+          "embeddedDomains": [],
+          "embeddedDomainMatchesFromDomain": null
+        },
+        "localPart": "notice",
+        "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdDomainParts": {
+          "domain": "evil.test",
+          "labels": ["evil", "test"],
+          "labelCount": 2,
+          "topLabel": "test",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdRegistrableDomainMatchesFromDomain": null
+      },
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=evil.test; dkim=fail header.d=evil.test",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "fail", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "fail", "properties": { "smtp.mailfrom": "evil.test" } },
+            { "method": "dkim", "result": "fail", "properties": { "header.d": "evil.test" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "auth.method.failure",
+        "category": "auth-failure",
+        "severity": "high",
+        "message": "DMARC returned fail.",
+        "data": {
+          "method": "dmarc",
+          "result": "fail",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "properties": { "header.from": "example.com" }
+        }
+      },
+      {
+        "key": "auth.method.failure",
+        "category": "auth-failure",
+        "severity": "medium",
+        "message": "SPF returned fail.",
+        "data": {
+          "method": "spf",
+          "result": "fail",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "properties": { "smtp.mailfrom": "evil.test" }
+        }
+      },
+      {
+        "key": "auth.method.failure",
+        "category": "auth-failure",
+        "severity": "medium",
+        "message": "DKIM returned fail.",
+        "data": {
+          "method": "dkim",
+          "result": "fail",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "properties": { "header.d": "evil.test" }
+        }
+      },
+      {
+        "key": "messageId.domainMismatch",
+        "category": "consistency",
+        "severity": "low",
+        "message": "Message-ID domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "messageIdDomain": "evil.test",
+          "mismatchedDomains": ["evil.test"]
+        }
+      },
+      {
+        "key": "replyTo.domainMismatch",
+        "category": "consistency",
+        "severity": "low",
+        "message": "Reply-To domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "replyToDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
+      },
+      {
+        "key": "returnPath.domainMismatch",
+        "category": "consistency",
+        "severity": "low",
+        "message": "Return-Path domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "returnPathDomain": "evil.test",
+          "mismatchedDomains": ["evil.test"]
+        }
+      },
+      {
+        "key": "smtpMailfrom.domainMismatch",
+        "category": "consistency",
+        "severity": "low",
+        "message": "SPF smtp.mailfrom domain differs from the From domain.",
+        "data": {
+          "fromDomain": "example.com",
+          "smtpMailfromDomains": ["evil.test"],
+          "mismatchedDomains": ["evil.test"]
+        }
+      },
+      {
+        "key": "composite.unauthenticatedFromSpoof",
+        "category": "composite",
+        "severity": "high",
+        "message": "Visible From domain is not backed by aligned authentication and another sender identifier disagrees with it.",
+        "data": {
+          "fromDomain": "example.com",
+          "anyAuthAligned": false,
+          "dmarcPass": false,
+          "contributingSignals": [
+            "auth.method.failure",
+            "messageId.domainMismatch",
+            "replyTo.domainMismatch",
+            "returnPath.domainMismatch",
+            "smtpMailfrom.domainMismatch"
+          ]
+        }
+      }
+    ]
+  }
+}
