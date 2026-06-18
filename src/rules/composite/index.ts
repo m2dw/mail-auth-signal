@@ -9,11 +9,13 @@ import { resolveHeaderTrust } from "../trust.js";
 import { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
 import { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 import { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
+import { unsecuredDeepSubdomainCandidateRule } from "./unsecuredDeepSubdomainCandidate.js";
 import { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
 
 export { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
 export { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 export { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
+export { unsecuredDeepSubdomainCandidateRule } from "./unsecuredDeepSubdomainCandidate.js";
 export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
 
 /**
@@ -27,15 +29,17 @@ export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfi
  * explicit choice the consuming add-on makes.
  *
  * Order is stable but carries no policy meaning; composites are observations, not
- * a ranked verdict. The two spoof composites precede the benign affirmation so a
- * reader scanning the emitted signals sees risk observations before the
- * "all clear", though alignedAuthenticationConfirmedRule reads metrics (not the
- * other composites' output) so the ordering does not change any result.
+ * a ranked verdict. The risk-observation composites (the two spoof shapes and the
+ * unsecured deep-subdomain candidate) precede the benign affirmation so a reader
+ * scanning the emitted signals sees risk observations before the "all clear",
+ * though alignedAuthenticationConfirmedRule reads metrics (not the other
+ * composites' output) so the ordering does not change any result.
  */
 export const defaultCompositeRules: readonly CompositeRule[] = [
   unauthenticatedFromSpoofRule,
   publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
+  unsecuredDeepSubdomainCandidateRule,
   alignedAuthenticationConfirmedRule,
 ];
 

@@ -44,6 +44,7 @@ export {
   unauthenticatedFromSpoofRule,
   publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
+  unsecuredDeepSubdomainCandidateRule,
   alignedAuthenticationConfirmedRule,
 } from "./rules/composite/index.js";
 export type {
