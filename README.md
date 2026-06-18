@@ -6,7 +6,7 @@
 
 Mail Auth Signal is a lightweight sender-risk signal engine for email authentication results and header consistency analysis.
 
-It is intended to be the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
+It is the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. A per-module audit of the add-on's `src/core/*.js` files (see [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md) and [Migration status](#migration-status)) finds that most reusable detection logic has been migrated here, with one pure helper — Jaro-Winkler string similarity — still classified *Needs migration*. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
 
 ## Goals
 
@@ -61,7 +61,8 @@ console.log(result.signals);
 
 `analyzeMessage(input: AnalyzeInput, rules?: readonly Rule[], deps?: MetricsDependencies, compositeRules?: readonly CompositeRule[]): AnalyzeResult`
 is the primary public analysis entry point. Internally it runs in separable halves
-so detection rules can be migrated incrementally:
+so detection rules stay independently composable — callers can pass a subset, add
+their own, or layer in any future rule without re-parsing headers:
 
 ```ts
 import { extractMetrics, runRules, defaultRules, analyzeMessage } from "mail-auth-signal";
@@ -104,11 +105,11 @@ const signals = runRules(metrics, input.options, defaultRules); // interpretatio
 The core is pure: it reads no globals, no environment variables, and performs no I/O. All context flows in through `AnalyzeOptions`:
 
 - `trustedAuthservIds` — the authserv-ids the caller's mail system stamps on inbound mail. The caller is responsible for this list; the core has no built-in opinion.
-- `context` — an open-ended serializable bag for future caller-provided policy context (per-sender overrides, allow-listed domains, metadata). Currently ignored by all rules; reserved for rule migration from the Thunderbird add-on.
+- `context` — an open-ended serializable bag for future caller-provided policy context (per-sender overrides, allow-listed domains, metadata). Currently ignored by all rules; reserved as a forward-compatible extension point for caller-supplied policy context.
 
 ## Writing a rule
 
-A `Rule` is the unit of incremental migration. Each detection rule is a pure
+A `Rule` is the unit of extension. Each detection rule is a pure
 function of a `RuleContext` (`{ metrics, options }`) that returns zero or more
 `Signal`s — never a score or an allow/block decision. A rule that needs a new
 fact adds it to metric extraction rather than re-parsing headers, keeping
@@ -514,12 +515,24 @@ Pass `--trusted <authserv-id>` (repeatable) to declare trusted
 headers are treated as untrusted and authentication-failure signals are
 downgraded to `low` severity.
 
-## Current status
+## Migration status
 
-This repository is in early development. Implemented so far:
+The Thunderbird Auth Results Filter add-on's core modules (`src/core/*.js`) were
+audited file by file in [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md), which
+classifies each as *Migrated*, *Not core* (caller-owned), *Needs migration*, or
+*Needs decision*. Most reusable core is **migrated** (listed below). The
+migration is **not** complete: one pure, data-free helper —
+**`jaroWinkler.js`** (Jaro-Winkler string similarity) — is classified *Needs
+migration* and tracked as a follow-up issue, and **`bigramNaturalness.js`** is
+*Needs decision* because it needs a license-cleared language-frequency corpus.
+Future add-on logic will be evaluated case by case against that same
+classification.
+
+Migrated core (pure parsing, metrics, signals — no UI, storage, mailbox actions,
+network, or scoring policy):
 
 - Header normalization
-- Basic mailbox/domain extraction
+- Mailbox/domain extraction
 - `Authentication-Results` method/result extraction
 - Trusted authserv-id matching, with shared trust resolution for all AR rules
 - Trust-aware Authentication-Results failure signals (SPF/DKIM/DMARC)
@@ -531,8 +544,19 @@ This repository is in early development. Implemented so far:
 - Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
 - Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and an optional registrable-domain comparison via a caller-supplied PSL resolver (no list bundled)
 - Richer lexical heuristics helper (`computeLexicalHeuristics`): entropy, normalized entropy, vowel ratio, max consonant/repeated runs, unique-character ratio, and letter/digit transitions — data-free and policy-neutral
+- Composite (Layer 4) signals combining the base layers (opt-in)
 
-The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
+Add-on behavior that is intentionally **not** migrated — UI, notifications,
+mailbox/folder actions, storage, Thunderbird/WebExtension APIs, network/DNS, and
+the caller-owned policy modules `customFormulas.js`, `whitelist.js`, `scoring.js`,
+plus bundled PSL/brand/word-list data — stays caller-owned by the boundary in
+[`AGENTS.md`](./AGENTS.md).
+
+Open items in the audit: one **pending core port** — `jaroWinkler.js` (*Needs
+migration*, tracked as a follow-up issue) — and one **license decision** —
+whether to ever bundle the language-frequency corpus that `bigramNaturalness.js`
+would require (*Needs decision*). The standing PSL/reference-data boundary remains
+caller-owned.
 
 ## License
 
