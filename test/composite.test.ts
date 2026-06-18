@@ -128,6 +128,95 @@ describe("composite.unauthenticatedFromSpoof", () => {
     ).not.toContain("composite.unauthenticatedFromSpoof");
   });
 
+  it("stays silent when the trusted header carries no SPF/DKIM/DMARC sender-auth result", () => {
+    // The trusted header only reports arc=pass — no sender authentication ran — so
+    // anyAuthAligned is vacuously false. A bare Message-ID mismatch must not turn an
+    // unevaluated message into a confirmed unauthenticated spoof.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<spoof@evil.test>",
+        "authentication-results": `${TRUSTED_ID}; arc=pass`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.trustedHeaderCount).toBe(1);
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    // The Message-ID mismatch is present as a base consistency signal...
+    expect(result.signals.map((s) => s.key)).toContain("messageId.domainMismatch");
+    // ...but with no trusted sender-auth result it must not escalate.
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("does not escalate when the only mismatch comes from an untrusted AR header", () => {
+    // Honest-but-failing message: every identifier names example.com and the trusted
+    // header shows SPF/DKIM/DMARC fail. An attacker injects an untrusted header
+    // claiming dkim=pass header.d=evil.test, which makes dkim.domainMismatch fire. That
+    // forge-able AR-derived mismatch must not escalate the honest failure to a spoof.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<id@example.com>",
+        "return-path": "<bounce@example.com>",
+        "authentication-results": [
+          `${TRUSTED_ID}; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=example.com; dkim=fail header.d=example.com`,
+          "relay.evil.test; dkim=pass header.d=evil.test",
+        ],
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    // The forged untrusted header produced a base consistency mismatch...
+    expect(result.signals.map((s) => s.key)).toContain("dkim.domainMismatch");
+    // ...but only trusted/message-header evidence may escalate, so the composite stays silent.
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("does not escalate on an untrusted smtp.mailfrom mismatch alone", () => {
+    // Same shape as above but the injected untrusted header forges an SPF
+    // smtp.mailfrom=evil.test. The smtpMailfrom.domainMismatch it produces is
+    // forge-able, so it must not escalate the honest failure.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<id@example.com>",
+        "return-path": "<bounce@example.com>",
+        "authentication-results": [
+          `${TRUSTED_ID}; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=example.com; dkim=fail header.d=example.com`,
+          "relay.evil.test; spf=pass smtp.mailfrom=evil.test",
+        ],
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(result.signals.map((s) => s.key)).toContain("smtpMailfrom.domainMismatch");
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("still fires on a trusted smtp.mailfrom mismatch even without a message-header tell", () => {
+    // Authoritative evidence need not be a message header: a trusted SPF header whose
+    // smtp.mailfrom disagrees with From is enough divergent-identity evidence to fire.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<id@example.com>",
+        "return-path": "<bounce@example.com>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=evil.test; dkim=fail header.d=example.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).toContain("composite.unauthenticatedFromSpoof");
+  });
+
   it("stays silent when no trusted header gives a basis to judge", () => {
     const result = analyzeWithComposites({
       headers: {

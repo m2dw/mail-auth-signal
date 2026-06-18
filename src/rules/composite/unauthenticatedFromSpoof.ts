@@ -35,22 +35,37 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     is vacuously false and a mismatch could be perfectly benign mail we simply
  *     could not check. The missing/untrusted base signals cover that case; this
  *     composite stays silent rather than guess.
+ *   - at least one trusted SPF/DKIM/DMARC result: a trusted header can carry only
+ *     results that are not sender authentication (e.g. arc=pass), which still
+ *     leaves anyAuthAligned vacuously false. Without this guard a message we never
+ *     evaluated for SPF/DKIM/DMARC would read as a confirmed unauthenticated From,
+ *     so "not aligned" is only treated as evidence once a sender-auth check has
+ *     actually run.
  *   - anyAuthAligned === false: a message with even one aligned, trusted, passing
  *     SPF or DKIM identifier for the From domain is, by DMARC's own logic,
  *     authenticated as that domain — so a forwarder that fails SPF but keeps an
  *     aligned DKIM signature does not trip this. Only the genuinely
  *     unauthenticated From reaches here.
- *   - at least one base "consistency" signal: a misconfigured-but-honest sender
- *     whose own identifiers all still name the From domain (it just failed to
- *     authenticate) produces auth-failure signals but no consistency mismatch, so
- *     it is left to the base auth.method.failure signals and not escalated to a
- *     spoof verdict here.
+ *   - at least one *authoritative* divergent identifier: a misconfigured-but-honest
+ *     sender whose own identifiers all still name the From domain (it just failed to
+ *     authenticate) produces auth-failure signals but no consistency mismatch, so it
+ *     is left to the base auth.method.failure signals. Crucially, the mismatch must
+ *     be one an upstream attacker cannot forge: a message-header mismatch (Message-ID,
+ *     Reply-To, Return-Path), the trusted-only DMARC header.from mismatch, or an SPF
+ *     smtp.mailfrom / passing-DKIM header.d mismatch carried by a *trusted* header.
+ *     The base smtpMailfrom/dkim/envelopeSender consistency signals read every AR
+ *     header, trusted or not, so an injected untrusted `dkim=pass header.d=evil.test`
+ *     or `spf ... smtp.mailfrom=evil.test` is not accepted on its own — otherwise an
+ *     attacker could pin a forged mismatch onto an honest failure and escalate it.
  *
  * Not attacker-triggerable as a false positive against a third party: the only
  * way to *suppress* this signal is to authenticate the From domain (which a
  * spoofer of someone else's domain cannot) or to make every identifier agree with
  * the From (which, for a domain they do not control, means actually being that
- * domain). An attacker can only trigger it on their own spoof.
+ * domain). And it cannot be *manufactured* against an honest sender by injecting a
+ * forge-able Authentication-Results header, because only trusted AR-derived or
+ * message-header mismatches qualify as evidence. An attacker can only trigger it on
+ * their own spoof.
  *
  * Severity high: it combines a failure to authenticate with positive evidence of
  * a divergent identity. It remains an observation, not an action — the caller
@@ -61,25 +76,73 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
   description:
     "The visible From domain has no aligned, trusted authentication and another sender identifier disagrees with it.",
   evaluate({ metrics, signals }): Signal[] {
-    const { authentication } = metrics;
+    const { authentication, fromDomain } = metrics;
     // A visible-From spoof needs a visible From. With no parseable From domain the
     // From-comparison consistency signals cannot fire, and the only consistency
     // signal that can — envelopeSender.domainDisagreement — never compares to From,
     // so without this guard malformed/system mail with a disagreeing envelope would
     // emit a high verdict carrying fromDomain:null.
-    if (metrics.fromDomain === null) return [];
+    if (fromDomain === null) return [];
     // No trusted header means nothing was actually evaluated; do not manufacture
     // a verdict from an unverifiable message.
     if (authentication.trustedHeaderCount === 0) return [];
+    // A trusted header is not enough on its own: it may carry only results that are
+    // not sender authentication (e.g. arc=pass), which leaves anyAuthAligned
+    // vacuously false. Require at least one trusted SPF/DKIM/DMARC result so "not
+    // aligned" reflects a sender-auth check that actually ran on this message,
+    // rather than treating an unevaluated message as a confirmed unauthenticated
+    // spoof.
+    const hasTrustedSenderAuth =
+      authentication.spfResults.some((result) => result.trusted) ||
+      authentication.dkimResults.some((result) => result.trusted) ||
+      authentication.dmarcResults.some((result) => result.trusted);
+    if (!hasTrustedSenderAuth) return [];
     // An aligned, trusted, passing identifier authenticates the From domain.
     if (authentication.anyAuthAligned !== false) return [];
 
     const consistencyKeys = signals
       .filter((signal) => signal.category === "consistency")
       .map((signal) => signal.key);
-    // Without a divergent identifier this is an honest authentication failure,
+
+    // The divergent-identifier evidence must be authoritative — something an
+    // upstream attacker cannot forge by injecting their own Authentication-Results
+    // header. Two kinds qualify:
+    //   - message-header mismatches (Message-ID, Reply-To, Return-Path) and the
+    //     trusted-only DMARC header.from mismatch, none of which are AR-forgeable; and
+    //   - an SPF smtp.mailfrom or a passing DKIM header.d that disagrees with From
+    //     carried by a *trusted* Authentication-Results header.
+    // The base smtpMailfrom/dkim/envelopeSender consistency signals are derived from
+    // every AR header, trusted or not, so an injected untrusted `dkim=pass
+    // header.d=evil.test` or `spf ... smtp.mailfrom=evil.test` would otherwise let an
+    // attacker manufacture a mismatch and escalate an honest auth failure or
+    // misconfiguration to a high spoof. Re-checking trust at the source for those
+    // AR-derived tells closes that path while still accepting genuine disagreement.
+    const authoritativeConsistencyKeys = new Set([
+      "messageId.domainMismatch",
+      "replyTo.domainMismatch",
+      "returnPath.domainMismatch",
+      "dmarc.headerFromMismatch",
+    ]);
+    const hasMessageHeaderMismatch = consistencyKeys.some((key) =>
+      authoritativeConsistencyKeys.has(key),
+    );
+    const hasTrustedSpfMismatch = authentication.spfResults.some(
+      (result) =>
+        result.trusted && result.smtpMailfrom !== null && result.smtpMailfrom !== fromDomain,
+    );
+    const hasTrustedDkimMismatch = authentication.dkimResults.some(
+      (result) =>
+        result.trusted &&
+        result.result === "pass" &&
+        result.headerD !== null &&
+        result.headerD !== fromDomain,
+    );
+    // Without an authoritative divergent identifier this is an honest
+    // authentication failure (or a mismatch only a forged upstream header asserts),
     // not evidence of impersonation; leave it to the base auth-failure signals.
-    if (consistencyKeys.length === 0) return [];
+    if (!hasMessageHeaderMismatch && !hasTrustedSpfMismatch && !hasTrustedDkimMismatch) {
+      return [];
+    }
 
     const authFailureKeys = signals
       .filter((signal) => signal.category === "auth-failure")
@@ -96,7 +159,7 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
         message:
           "Visible From domain is not backed by aligned authentication and another sender identifier disagrees with it.",
         data: {
-          fromDomain: metrics.fromDomain,
+          fromDomain,
           anyAuthAligned: authentication.anyAuthAligned,
           dmarcPass: authentication.dmarcPass,
           contributingSignals,
