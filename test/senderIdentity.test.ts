@@ -125,6 +125,17 @@ describe("parseFromMailbox — domain agrees with the canonical extractor", () =
       domain: "evil.test",
     });
   });
+
+  it("skips an address-shaped angle fragment inside the quoted display name", () => {
+    // The quoted phrase holds a full `<service@paypal.com>` angle-addr; the real
+    // mailbox is the angle-addr *outside* the quotes. Taking the inner fragment
+    // would report paypal.com as the sender and hide the display-name spoof.
+    expect(parseFromMailbox('"Support <service@paypal.com>" <attacker@evil.test>')).toEqual({
+      displayName: "Support <service@paypal.com>",
+      localPart: "attacker",
+      domain: "evil.test",
+    });
+  });
 });
 
 describe("senderIdentity — display-name address spoof", () => {
@@ -149,6 +160,19 @@ describe("senderIdentity — display-name address spoof", () => {
     expect(si.displayName.containsEmail).toBe(true);
     expect(si.displayName.embeddedDomains).toEqual(["paypal.com"]);
     expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
+    expect(metrics.fromDomain).toBe("evil.test");
+  });
+
+  it("still catches the spoof when the quoted display name holds an angle-addr fragment", () => {
+    const metrics = extractMetrics({
+      headers: { from: '"Support <service@paypal.com>" <attacker@evil.test>' },
+    });
+    const si = metrics.senderIdentity;
+    expect(si.displayName.text).toBe("Support <service@paypal.com>");
+    expect(si.displayName.containsEmail).toBe(true);
+    expect(si.displayName.embeddedDomains).toEqual(["paypal.com"]);
+    expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
+    expect(si.localPart).toBe("attacker");
     expect(metrics.fromDomain).toBe("evil.test");
   });
 

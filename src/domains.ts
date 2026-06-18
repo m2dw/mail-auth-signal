@@ -7,10 +7,14 @@ export function extractDomainFromMailbox(value: string | null): string | null {
   // attacker domain out of the comment instead of the real reply target.
   const withoutComments = stripComments(value);
 
+  // Prefer the first angle-addr *outside* any quoted phrase. A quoted display
+  // name may itself contain an address-shaped `<...@...>` fragment (e.g.
+  // `"Support <service@paypal.com>" <attacker@evil.test>`); taking that inner
+  // fragment would report the brand domain as the real From and mask the spoof.
   // The captured domain excludes '@' so a malformed multi-'@' address does not
   // yield a bogus domain that could trigger a spurious consistency signal.
-  const angleMatch = /<[^<>@\s]+@([^<>@\s]+)>/.exec(withoutComments);
-  const domain = angleMatch?.[1] ?? /[^<>@\s]+@([^<>@\s,;]+)/.exec(withoutComments)?.[1];
+  const angleMatch = firstAngleAddrOutsideQuotes(withoutComments);
+  const domain = angleMatch?.[2] ?? /[^<>@\s]+@([^<>@\s,;]+)/.exec(withoutComments)?.[1];
   return normalizeDomain(domain ?? null);
 }
 
@@ -313,7 +317,12 @@ export function parseFromMailbox(value: string | null): {
 
   const withoutComments = stripComments(value);
 
-  const angleMatch = /<([^<>@\s]+)@([^<>@\s]+)>/.exec(withoutComments);
+  // Take the first angle-addr that is *outside* any quoted phrase. A quoted
+  // display name may itself contain an address-shaped angle fragment, e.g.
+  // `"Support <service@paypal.com>" <attacker@evil.test>`; matching that inner
+  // fragment would report the brand address as the real mailbox and hide the
+  // very display-name spoof these metrics exist to surface.
+  const angleMatch = firstAngleAddrOutsideQuotes(withoutComments);
   let localPartRaw: string | null = null;
   let domainRaw: string | null = null;
   let displayName: string | null = null;
@@ -354,6 +363,42 @@ function unquoteDisplayName(value: string): string {
     return trimmed.slice(1, -1).replace(/\\(.)/g, "$1").trim();
   }
   return trimmed;
+}
+
+/**
+ * Return the first angle-addr (`<local@domain>`) whose opening "<" falls outside
+ * any double-quoted phrase, or null when every angle-addr sits inside quotes.
+ *
+ * RFC 5322 allows a quoted display name to contain almost any character,
+ * including an address-shaped `<...@...>` fragment. The real mailbox is always
+ * the angle-addr outside the quoted phrase, so an inner fragment must be skipped
+ * rather than taken as the first match.
+ */
+function firstAngleAddrOutsideQuotes(value: string): RegExpExecArray | null {
+  const re = /<([^<>@\s]+)@([^<>@\s]+)>/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(value)) !== null) {
+    if (!isIndexInsideQuotes(value, match.index)) return match;
+  }
+  return null;
+}
+
+/**
+ * Whether the character at `index` lies inside a double-quoted phrase, honoring
+ * backslash escapes (`\"` does not close the quote). Used to keep address
+ * extraction from reaching into a quoted display name.
+ */
+function isIndexInsideQuotes(value: string, index: number): boolean {
+  let inQuotes = false;
+  for (let i = 0; i < index; i++) {
+    const ch = value[i];
+    if (inQuotes && ch === "\\") {
+      i += 1; // skip the escaped character
+      continue;
+    }
+    if (ch === '"') inQuotes = !inQuotes;
+  }
+  return inQuotes;
 }
 
 /**
