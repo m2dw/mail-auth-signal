@@ -7,14 +7,19 @@
     every add-on core-relevant behavior as *Migrated* (with owning source/tests
     named), *Not core* (caller-owned: UI, notifications, mailbox actions,
     storage, Thunderbird/WebExtension APIs, network/DNS, scoring policy, bundled
-    PSL/word-list data), *Needs migration*, or *Needs decision*. No behavior is
-    classified *Needs migration*; the open items are a confirmatory re-diff
-    against the add-on and the standing PSL/data license boundary.
+    PSL/word-list data), *Needs migration*, or *Needs decision*. One reusable
+    core item remains *Needs migration* — `jaroWinkler.js`, the pure, data-free
+    Jaro-Winkler string-similarity helper, tracked as a concrete follow-up issue
+    — and one item is *Needs decision*: `bigramNaturalness.js`, whose naturalness
+    scoring needs a license-cleared language-frequency corpus before its
+    algorithm can be ported.
   - Replaced the README's ambiguous "early development" / "remaining rules will
     be migrated incrementally" wording (which implied both an incomplete and a
-    completed migration) with a "Migration status" section stating that the
-    currently identified reusable core migration is complete and future add-on
-    logic is evaluated case by case. No source or behavior change.
+    completed migration) with a "Migration status" section stating that most
+    reusable core is migrated but the migration is **not** complete —
+    `jaroWinkler.js` remains *Needs migration* and `bigramNaturalness.js` is
+    *Needs decision* — and that future add-on logic is evaluated case by case.
+    No source or behavior change.
 
 ## v0.3.0 — 2026-06-18
 
