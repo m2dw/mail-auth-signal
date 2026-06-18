@@ -106,6 +106,71 @@ describe("composite.unsecuredDeepSubdomainCandidate", () => {
     expect(candidate(result.signals)).toBeUndefined();
   });
 
+  it("flags when the trusted DMARC none names the organizational domain (relaxed)", () => {
+    // A verifier may report the registrable/organizational domain in header.from
+    // rather than the exact deep-subdomain From. That still describes this From's
+    // organization, so the candidate is bound and raised.
+    const result = analyze({
+      headers: {
+        from: "Support <alerts@sivakeso.support.sn5799.com>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=none header.from=sn5799.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(candidate(result.signals)).toBeDefined();
+  });
+
+  it("does not flag when the trusted DMARC none names a different From domain", () => {
+    // With several trusted AR headers, the deep-subdomain From's own DMARC passes
+    // while a trusted dmarc=none describes an unrelated domain. The none must be
+    // bound to this From's organizational domain, so it does not raise the
+    // candidate for a From that is actually DMARC-protected.
+    const result = analyze({
+      headers: {
+        from: "Support <alerts@sivakeso.support.sn5799.com>",
+        "authentication-results": [
+          `${TRUSTED_ID}; dmarc=pass header.from=sivakeso.support.sn5799.com`,
+          `${TRUSTED_ID}; dmarc=none header.from=unrelated.test`,
+        ],
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.senderIdentity.fromDomainParts?.subdomainDepth).toBe(2);
+    expect(candidate(result.signals)).toBeUndefined();
+  });
+
+  it("does not flag a deep subdomain backed by org-domain (relaxed) aligned DKIM", () => {
+    // Parent-domain signing: From `bounce.mail.example.com` signed with
+    // `header.d=example.com`. anyAuthAligned is exact-match only, so it is false
+    // here, but DMARC's relaxed alignment treats this as authenticated, so the
+    // same-org guard withholds the candidate.
+    const result = analyze({
+      headers: {
+        from: "Mail <a@bounce.mail.example.com>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=none header.from=bounce.mail.example.com; dkim=pass header.d=example.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.senderIdentity.fromDomainParts?.subdomainDepth).toBe(2);
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(candidate(result.signals)).toBeUndefined();
+  });
+
+  it("does not flag a deep subdomain backed by org-domain (relaxed) aligned SPF", () => {
+    // Envelope at the organizational domain: From `bounce.mail.example.com` with
+    // an aligned-by-relaxed SPF pass on `smtp.mailfrom=example.com`.
+    const result = analyze({
+      headers: {
+        from: "Mail <a@bounce.mail.example.com>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=none header.from=bounce.mail.example.com; spf=pass smtp.mailfrom=example.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.senderIdentity.fromDomainParts?.subdomainDepth).toBe(2);
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(candidate(result.signals)).toBeUndefined();
+  });
+
   it("does not flag when the DMARC none comes only from an untrusted header", () => {
     // An untrusted AR header's dmarc=none is forge-able and not authoritative, so
     // it must not, on its own, raise the candidate.

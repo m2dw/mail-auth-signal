@@ -22,13 +22,17 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     (MetricsDependencies.getRegistrableDomain); without one the depth is null
  *     and this rule cannot tell a deep subdomain from a bare registrable domain,
  *     so it stays silent rather than guess (the core bundles no PSL data).
- *   - a trusted `dmarc=none` result: a verifier the caller declared trusted
- *     reported that the From's organizational domain has no enforced DMARC
- *     policy. Trust is required because, like every DMARC read in this core, an
- *     untrusted Authentication-Results header is forge-able and its `dmarc=none`
- *     is just an upstream assertion; reading it from the recomputed,
+ *   - a trusted `dmarc=none` result *for this From*: a verifier the caller
+ *     declared trusted reported that the From's organizational domain has no
+ *     enforced DMARC policy. Trust is required because, like every DMARC read in
+ *     this core, an untrusted Authentication-Results header is forge-able and its
+ *     `dmarc=none` is just an upstream assertion; reading it from the recomputed,
  *     trust-resolved `authentication` projection keeps this consistent with the
- *     rest of the pipeline.
+ *     rest of the pipeline. The `dmarc=none` is also bound to the current From's
+ *     organizational domain via its `header.from`: with several trusted AR
+ *     headers, a `none` whose header.from is missing or names a different domain
+ *     describes some other identity, and accepting it would let the rule claim
+ *     this From is unprotected even when its own DMARC result is `pass`/`fail`.
  *
  * Why these are individually weak but jointly meaningful: plenty of legitimate
  * mail rides deep ESP subdomains, and plenty of small domains have not deployed
@@ -36,17 +40,22 @@ import type { CompositeRule, Signal } from "../../types.js";
  * From is the disposable-spoof shape, because it means the recipient sees a
  * structured, brand-ish hostname that no published policy actually protects.
  *
- * False-positive mitigation (anyAuthAligned === false): a From domain backed by
- * an aligned, trusted, passing SPF or DKIM identifier is authenticated as that
- * domain by DMARC's own logic, even when the organizational domain publishes no
- * DMARC record (so the verifier still says `dmarc=none`). A legitimate
- * deep-subdomain sender that signs with an aligned DKIM key therefore does not
- * trip this. Crucially this guard is not attacker-triggerable: to suppress the
- * signal a spoofer would have to produce aligned, trusted authentication for the
- * very domain in the visible From — which, for a domain they merely typed into
- * the header, they cannot. The signal can only be *raised* by sending from a
- * deep subdomain with weak DMARC, which is the attacker's own choice, never an
- * honest third party's.
+ * False-positive mitigation (no aligned authentication): a From domain backed by
+ * a trusted, passing SPF or DKIM identifier is authenticated as that domain by
+ * DMARC's own logic, even when the organizational domain publishes no DMARC
+ * record (so the verifier still says `dmarc=none`). This is checked two ways,
+ * mirroring DMARC's two alignment modes: `anyAuthAligned === false` rules out an
+ * *exact*-match aligned pass, and a same-organization check additionally rules
+ * out *relaxed* alignment — a parent-domain identifier such as `dkim=pass
+ * header.d=example.com` on a From of `bounce.mail.example.com`. Because this rule
+ * already depends on the PSL-derived registrable domain, suppressing same-org
+ * SPF/DKIM passes avoids false positives for legitimate parent-domain signing.
+ * Crucially the guard is not attacker-triggerable: to suppress the signal a
+ * spoofer would have to produce trusted, passing authentication for the visible
+ * From's organizational domain — which, for a domain they merely typed into the
+ * header, they cannot. The signal can only be *raised* by sending from a deep
+ * subdomain with weak DMARC, which is the attacker's own choice, never an honest
+ * third party's.
  *
  * Severity low: it is a candidate lead, not a confirmed spoof. A structured
  * hostname under an unenforced organizational domain is worth surfacing, but
@@ -73,11 +82,32 @@ export const unsecuredDeepSubdomainCandidateRule: CompositeRule = {
     if (fromParts === null || fromParts.subdomainDepth === null) return [];
     if (fromParts.subdomainDepth < 2) return [];
 
+    // subdomainDepth and registrableDomain are resolved together from the same PSL
+    // lookup, so a non-null depth implies a non-null registrable domain; narrow it
+    // for the type checker (and stay silent in the impossible null case).
+    const registrableDomain = fromParts.registrableDomain;
+    if (registrableDomain === null) return [];
+
+    // Same-organization test under DMARC's relaxed alignment: a domain belongs to
+    // the From's organization when it *is* the registrable domain or sits beneath
+    // it. Used both to bind the DMARC=none result to the visible From and to
+    // suppress parent-domain (org-aligned) SPF/DKIM passes below.
+    const sharesFromOrg = (domain: string | null): boolean =>
+      domain !== null &&
+      (domain === registrableDomain || domain.endsWith(`.${registrableDomain}`));
+
     // Weak DMARC posture: a trusted verifier reported no enforced DMARC policy for
     // the From's organizational domain. Trust is required because an untrusted AR
-    // header's `dmarc=none` is forge-able and merely an upstream claim.
+    // header's `dmarc=none` is forge-able and merely an upstream claim. The result
+    // must also concern the *current* From's organizational domain: with several
+    // trusted AR headers, a `dmarc=none` whose header.from is missing or names a
+    // different domain says nothing about this From — whose own DMARC may even be
+    // pass/fail — so it must not raise the candidate.
     const hasTrustedDmarcNone = authentication.dmarcResults.some(
-      (result) => result.trusted && result.result === "none",
+      (result) =>
+        result.trusted &&
+        result.result === "none" &&
+        sharesFromOrg(result.headerFrom),
     );
     if (!hasTrustedDmarcNone) return [];
 
@@ -87,6 +117,27 @@ export const unsecuredDeepSubdomainCandidateRule: CompositeRule = {
     // domain they do not control cannot satisfy this, so the guard is not
     // attacker-triggerable.
     if (authentication.anyAuthAligned !== false) return [];
+
+    // anyAuthAligned is exact-match only, but DMARC's relaxed alignment treats a
+    // parent-domain identifier as aligned: a deep-subdomain From like
+    // `bounce.mail.example.com` is commonly signed with `dkim=pass header.d=example.com`
+    // (or SPF'd via an envelope at the organizational domain). Suppress the
+    // candidate when a trusted, passing SPF/DKIM authenticates the From's own
+    // organizational domain, to avoid false positives for parent-domain signing.
+    // This is still not attacker-triggerable: producing trusted, passing
+    // authentication for the visible From's organizational domain requires control
+    // of that domain, which a spoofer of someone else's domain does not have.
+    const hasOrgAlignedDkim = authentication.dkimResults.some(
+      (result) =>
+        result.trusted && result.result === "pass" && sharesFromOrg(result.headerD),
+    );
+    const hasOrgAlignedSpf = authentication.spfResults.some(
+      (result) =>
+        result.trusted &&
+        result.result === "pass" &&
+        sharesFromOrg(result.smtpMailfrom),
+    );
+    if (hasOrgAlignedDkim || hasOrgAlignedSpf) return [];
 
     return [
       {
