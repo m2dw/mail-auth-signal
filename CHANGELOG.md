@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 — 2026-06-19
+
+- Ported Jaro-Winkler string-similarity helper into reusable core (issue #50):
+  - Added `src/jaroWinkler.ts` with the pure, data-free `computeJaro(a, b)` and
+    `computeJaroWinkler(a, b, p?)` helpers, both exported from the public API.
+    Results are rounded to 4 decimal places (same convention as `LexicalHeuristics`)
+    for stable, cross-language-comparable fixture values.
+  - No brand lists, word lists, language corpora, or other licensed datasets are
+    bundled. The implementation is a clean port of the standard algorithm with
+    Unicode codepoint-array splitting so multi-byte characters are counted correctly.
+  - Added `test/jaroWinkler.test.ts` with a focused fixture/invariant suite and
+    the `test/fixtures/jaro-winkler.json` serializable fixture.
+  - Updated `MIGRATION-AUDIT.md`: `jaroWinkler.js` moves from *Needs migration*
+    to *Migrated* — this was the last outstanding item from the #45 audit.
+    `bigramNaturalness.js` remains *Needs decision* (license-cleared corpus required).
+
+- Added DMARC-none deep-subdomain composite signal (issue #48):
+  - Added the opt-in `composite.unsecuredDeepSubdomainCandidate` rule (medium):
+    fires when the visible From is on a deep subdomain (`subdomainDepth ≥ 2`, PSL-
+    derived via caller-supplied `getRegistrableDomain`) **and** a trusted verifier
+    reported `dmarc=none` for that From's organizational domain. Neither condition
+    alone is suspicious — the combination is the disposable-subdomain spoofing
+    shape: a pronounceable subdomain stack under a cheap registrable domain with no
+    enforced DMARC policy.
+  - The rule requires a registrable-domain resolver; without one `subdomainDepth`
+    is `null` and the rule stays silent rather than guess. The `dmarc=none` is
+    bound to the current From's organizational domain via its `header.from` field,
+    so a `none` from a different domain cannot satisfy the guard. No score or
+    allow/block/move decision is emitted.
+  - Added focused tests in `test/unsecuredDeepSubdomainCandidate.test.ts`.
 
 - Added a public mailbox provider catalog and a spoofing candidate signal (issue #47):
   - Bundled a small, explicit, hand-authored catalog of high-confidence public
@@ -50,18 +79,14 @@
     every add-on core-relevant behavior as *Migrated* (with owning source/tests
     named), *Not core* (caller-owned: UI, notifications, mailbox actions,
     storage, Thunderbird/WebExtension APIs, network/DNS, scoring policy, bundled
-    PSL/word-list data), *Needs migration*, or *Needs decision*. One reusable
-    core item remains *Needs migration* — `jaroWinkler.js`, the pure, data-free
-    Jaro-Winkler string-similarity helper, tracked as a concrete follow-up issue
-    — and one item is *Needs decision*: `bigramNaturalness.js`, whose naturalness
-    scoring needs a license-cleared language-frequency corpus before its
-    algorithm can be ported.
+    PSL/word-list data), *Needs migration*, or *Needs decision*. At audit time,
+    one reusable core item was *Needs migration* — `jaroWinkler.js` — and one
+    was *Needs decision*: `bigramNaturalness.js`. `jaroWinkler.js` has since been
+    completed by issue #50 (see above); `bigramNaturalness.js` remains *Needs
+    decision* pending a license-cleared language-frequency corpus.
   - Replaced the README's ambiguous "early development" / "remaining rules will
-    be migrated incrementally" wording (which implied both an incomplete and a
-    completed migration) with a "Migration status" section stating that most
-    reusable core is migrated but the migration is **not** complete —
-    `jaroWinkler.js` remains *Needs migration* and `bigramNaturalness.js` is
-    *Needs decision* — and that future add-on logic is evaluated case by case.
+    be migrated incrementally" wording with a "Migration status" section stating
+    that most reusable core is migrated but the migration is **not** complete.
     No source or behavior change.
 
 ## v0.3.0 — 2026-06-18
