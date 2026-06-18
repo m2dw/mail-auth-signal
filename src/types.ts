@@ -455,6 +455,19 @@ export type DisplayNameSignals = {
  *                     domains share a registrable domain. Requires a resolver;
  *                     null when none is supplied, either domain is absent, or
  *                     either has no registrable form. true/false otherwise.
+ * - fromDomainIsPublicMailboxProvider: whether the From domain belongs to the
+ *                     built-in (or caller-overridden) public mailbox provider
+ *                     catalog — a known consumer mailbox domain such as gmail.com
+ *                     or outlook.com. Matched against the From registrable domain
+ *                     when a PSL resolver is supplied, else the exact From domain.
+ *                     false when From is absent or in no catalog entry. A bare
+ *                     fact, not a verdict: a public-mailbox From is normal; it
+ *                     only matters paired with missing alignment (see the
+ *                     publicMailboxSpoofingCandidate composite).
+ * - publicMailboxProviderId: the matched provider's stable catalog id (e.g.
+ *                     "google", "microsoft"), or null when From belongs to no
+ *                     catalog entry. Lets a caller group or display by provider
+ *                     without re-deriving the catalog.
  */
 export type SenderIdentityMetrics = {
   displayName: DisplayNameMetrics;
@@ -464,6 +477,29 @@ export type SenderIdentityMetrics = {
   fromDomainParts: DomainParts | null;
   messageIdDomainParts: DomainParts | null;
   messageIdRegistrableDomainMatchesFromDomain: boolean | null;
+  fromDomainIsPublicMailboxProvider: boolean;
+  publicMailboxProviderId: string | null;
+};
+
+/**
+ * One entry in the public mailbox provider catalog: a stable provider id and the
+ * registrable (organizational) domains it owns.
+ *
+ * This is *data the core bundles* (see defaultPublicMailboxProviders), unlike the
+ * code-only MetricsDependencies — a caller may extend or fully replace it by
+ * passing its own list via MetricsDependencies.publicMailboxProviders. Kept small,
+ * explicit, and hand-authored so it stays clear of any imported Public Suffix
+ * List / brand-list license boundary (see AGENTS.md / NOTICE).
+ *
+ * - id:      a stable opaque label for the provider (e.g. "google"). Not a brand
+ *            claim; only identifies the catalog entry for grouping/display.
+ * - domains: the registrable domains owned by this provider, lower-cased.
+ *            Matching is exact and case-insensitive; no PSL logic is applied, so
+ *            these must already be registrable domains.
+ */
+export type PublicMailboxProvider = {
+  id: string;
+  domains: readonly string[];
 };
 
 /**
@@ -482,9 +518,20 @@ export type SenderIdentityMetrics = {
  *   Return null when the domain has no registrable form or the caller cannot
  *   resolve it; the registrable-domain metrics then stay null rather than guessed.
  *   The resolver should return an already-normalized (lower-cased) domain.
+ *
+ * - publicMailboxProviders: overrides the built-in public mailbox provider
+ *   catalog (defaultPublicMailboxProviders) used to populate
+ *   SenderIdentityMetrics.fromDomainIsPublicMailboxProvider /
+ *   publicMailboxProviderId. Unlike getRegistrableDomain this is *data*, not a
+ *   capability the core cannot bundle — the core ships a default — but it travels
+ *   here so a caller can extend or fully replace the catalog without forking core,
+ *   and so the override stays out of the serializable AnalyzeInput. Omitting it
+ *   uses the built-in catalog. To extend rather than replace, spread the default:
+ *   `[...defaultPublicMailboxProviders, { id: "acme", domains: ["acme.example"] }]`.
  */
 export type MetricsDependencies = {
   getRegistrableDomain?: (domain: string) => string | null;
+  publicMailboxProviders?: readonly PublicMailboxProvider[];
 };
 
 /**

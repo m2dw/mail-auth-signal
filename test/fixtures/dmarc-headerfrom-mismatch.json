@@ -80,7 +80,9 @@
           "registrableDomain": null,
           "subdomainDepth": null
         },
-        "messageIdRegistrableDomainMatchesFromDomain": null
+        "messageIdRegistrableDomainMatchesFromDomain": null,
+        "fromDomainIsPublicMailboxProvider": false,
+        "publicMailboxProviderId": null
       },
       "authenticationResults": [
         {

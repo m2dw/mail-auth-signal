@@ -151,7 +151,7 @@ mismatch:
 | `trust` | An `Authentication-Results` header came from an untrusted authserv-id. | `auth.results.untrusted` |
 | `auth-failure` | An SPF/DKIM/DMARC method returned a failing or error result. | `auth.method.failure` |
 | `consistency` | Two domains that should agree do not. | `messageId.domainMismatch`, `replyTo.domainMismatch`, `returnPath.domainMismatch`, `smtpMailfrom.domainMismatch`, `dkim.domainMismatch`, `dmarc.headerFromMismatch`, `envelopeSender.domainDisagreement` |
-| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.authenticatedDisplayNameSpoof`, `composite.alignedAuthenticationConfirmed` |
+| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.publicMailboxSpoofingCandidate`, `composite.authenticatedDisplayNameSpoof`, `composite.alignedAuthenticationConfirmed` |
 
 Two conventions keep the surface coherent:
 
@@ -319,6 +319,7 @@ signals computed under the same `options`, exactly as `analyzeMessage` does).
 | Signal | Severity | Fires when | Attacker model / guard |
 |---|---|---|---|
 | `composite.unauthenticatedFromSpoof` | high | A trusted header evaluated the message, **no** aligned authentication vouches for the From domain (`anyAuthAligned === false`), **and** at least one base consistency signal disagrees with From. | Direct domain impersonation. Combines "From is unauthenticated" with "an identifier disagrees". Stays silent on unevaluable messages (no trusted header) and honest auth misconfigurations (no identifier mismatch). The only way to suppress it is to actually authenticate the From domain. |
+| `composite.publicMailboxSpoofingCandidate` | medium | The visible From is a known **public mailbox provider** domain (`senderIdentity.fromDomainIsPublicMailboxProvider === true`), a trusted header evaluated the message, and **no** aligned authentication vouches for it (`anyAuthAligned === false`, no aligned trusted DMARC pass). | Borrowing a consumer-mailbox brand (`From: someone@outlook.com`) while sending from other infrastructure — the logged From `outlook.com` / Return-Path `icloud.com` / Message-ID `yahoo.co.jp` shape. These providers publish enforcing DMARC, so genuine mail always aligns; missing alignment is the tell *on its own*, without needing a second divergent identifier. A *candidate*, so medium — a forwarder that breaks both SPF and DKIM lands here too. Cannot be suppressed without real aligned auth, nor manufactured against honest mail (only trusted, passing results count). |
 | `composite.authenticatedDisplayNameSpoof` | medium | The message authenticates and aligns for its From (`anyAuthAligned === true`) **and** the display name addresses a different domain (`displayName.containsEmail && embeddedDomainMatchesFromDomain === false`). | Authenticated lookalike with a borrowed display name (`From: "security@paypal.com" <alerts@authed.example>`) — the case a pure auth/Junk filter waves through. The signal points at the attacker's own message, never the impersonated brand. |
 | `composite.alignedAuthenticationConfirmed` | info | A trusted header gives aligned, passing authentication for the From **and** there is no base `auth-failure` or `consistency` signal and no misleading display name. | **False-positive mitigation.** The single positive marker a caller needs to confidently lower a score. It gates on *real* aligned authentication for the visible From — which a spoofer of another domain cannot produce — and withholds on any conflicting signal, so it cannot be used to launder a forgery. |
 
@@ -390,6 +391,8 @@ verdict** — it exposes facts a caller can combine with its own thresholds.
 | `localPartLexical` / `fromDomainLexical` | Lexical profile of the local part / From domain: `{ length, digitCount, hyphenCount, hasNonAscii }` (counts are codepoint-based). `null` when the part is absent. |
 | `fromDomainParts` / `messageIdDomainParts` | Label decomposition of the From / Message-ID domain (see below). `null` when absent. |
 | `messageIdRegistrableDomainMatchesFromDomain` | Whether Message-ID and From share a registrable domain. Requires a resolver (see below); `null` otherwise. |
+| `fromDomainIsPublicMailboxProvider` | Whether the From domain is a known public mailbox provider (gmail.com, outlook.com, …) from the built-in catalog. `false` when absent or not in the catalog (see below). |
+| `publicMailboxProviderId` | The matched provider's stable catalog id (`"google"`, `"microsoft"`, …), or `null`. |
 
 `displayName` (`DisplayNameMetrics`) reports `present`, the unquoted `text`, its
 codepoint `length`, `hasNonAscii`, and — the attacker-relevant part — whether the
@@ -448,6 +451,51 @@ stay `null` and the label-based fields are still populated. This complements the
 exact-match consistency metrics: a caller with PSL data can treat an ESP subdomain
 (`mailer.example.com` vs `example.com`) as same-organization, where the exact
 `messageIdDomainMatchesFromDomain` reads as a mismatch.
+
+### Public mailbox provider catalog
+
+Spoofing often puts a major **public mailbox provider** domain in the visible
+From (`outlook.com`, `gmail.com`, `icloud.com`, …) while the real infrastructure
+and authentication point elsewhere. Because these providers publish enforcing
+DMARC and send only through their own infrastructure, genuine mail from them
+always authenticates and aligns — so a public-mailbox From with *no* aligned
+authentication is a meaningful spoof candidate. The core bundles a small, explicit
+catalog so consumers do not have to hand-maintain a Gmail/Outlook/Yahoo/iCloud
+list just to detect this class.
+
+`senderIdentity.fromDomainIsPublicMailboxProvider` and `publicMailboxProviderId`
+expose catalog membership of the From domain; the opt-in
+[`composite.publicMailboxSpoofingCandidate`](#composite-layer-4-signals)
+signal pairs that membership with missing alignment. Membership is matched against
+the From **registrable** domain when a `getRegistrableDomain` resolver is supplied
+(so `mail.gmail.com` still resolves), else the exact From domain.
+
+The catalog is *bundled data the core owns* — deliberately small and hand-authored,
+not an imported PSL/brand list, so it crosses no external-data license boundary
+(`AGENTS.md` / `NOTICE`). It is also exported and overridable:
+
+```ts
+import {
+  analyzeMessage,
+  defaultPublicMailboxProviders,
+  lookupPublicMailboxProvider,
+} from "mail-auth-signal";
+
+lookupPublicMailboxProvider("outlook.com"); // "microsoft"
+lookupPublicMailboxProvider("example.com"); // null
+
+// Extend (or fully replace) the catalog via MetricsDependencies:
+analyzeMessage(input, undefined, {
+  publicMailboxProviders: [
+    ...defaultPublicMailboxProviders,
+    { id: "fastmail", domains: ["fastmail.com", "fastmail.fm"] },
+  ],
+});
+```
+
+Membership is a **fact, not a verdict** — a public-mailbox From is perfectly
+normal. The core forms no opinion; only the candidate composite combines it with
+authentication state, and even that stays an observation the caller weighs.
 
 ## Lexical heuristics
 

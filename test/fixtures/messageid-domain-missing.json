@@ -72,7 +72,9 @@
           "subdomainDepth": null
         },
         "messageIdDomainParts": null,
-        "messageIdRegistrableDomainMatchesFromDomain": null
+        "messageIdRegistrableDomainMatchesFromDomain": null,
+        "fromDomainIsPublicMailboxProvider": false,
+        "publicMailboxProviderId": null
       },
       "authenticationResults": [
         {
