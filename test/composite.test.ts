@@ -351,6 +351,63 @@ describe("composite.authenticatedDisplayNameSpoof", () => {
     );
   });
 
+  it("fires on an aligned DMARC-only pass (trusted aggregate authenticates the From)", () => {
+    // The trusted verifier reports only an aggregate `dmarc=pass header.from=example.com`
+    // (no SPF/DKIM method lines), so anyAuthAligned is vacuously false. DMARC still
+    // only passes on an aligned identifier, so the From is authenticated and an
+    // authenticated display-name spoof must be recognized here too.
+    const result = analyzeWithComposites({
+      headers: {
+        from: '"security@paypal.com" <alerts@example.com>',
+        "message-id": "<id@example.com>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=example.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    const spoof = compositeSignals(result.signals).find(
+      (s) => s.key === "composite.authenticatedDisplayNameSpoof",
+    );
+    expect(spoof?.severity).toBe("medium");
+    expect(spoof?.data?.fromDomain).toBe("example.com");
+    expect(spoof?.data?.mismatchedDomains).toEqual(["paypal.com"]);
+  });
+
+  it("does not treat a trusted DMARC pass for a different header.from as authenticating", () => {
+    // A trusted `dmarc=pass header.from=evil.test` does not authenticate the visible
+    // From (example.com) — it is the dmarc.headerFromMismatch spoof tell, not a
+    // positive-auth gate, so this composite stays silent.
+    const result = analyzeWithComposites({
+      headers: {
+        from: '"security@paypal.com" <alerts@example.com>',
+        "message-id": "<id@example.com>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=evil.test`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.authenticatedDisplayNameSpoof");
+  });
+
+  it("does not treat an untrusted DMARC-only pass as authenticating", () => {
+    // An attacker can stamp an untrusted aggregate `dmarc=pass header.from=example.com`,
+    // so it must not open this positive-auth gate.
+    const result = analyzeWithComposites({
+      headers: {
+        from: '"security@paypal.com" <alerts@example.com>',
+        "message-id": "<id@example.com>",
+        "authentication-results": "relay.evil.test; dmarc=pass header.from=example.com",
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.authenticatedDisplayNameSpoof");
+  });
+
   it("stays silent when the authenticated message has no misleading display name", () => {
     const result = analyzeWithComposites({
       headers: {

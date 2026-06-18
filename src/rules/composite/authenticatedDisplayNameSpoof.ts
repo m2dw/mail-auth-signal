@@ -24,10 +24,15 @@ import type { CompositeRule, Signal } from "../../types.js";
  * different domain" isolates that case.
  *
  * Guards:
- *   - anyAuthAligned === true: only fire when the message genuinely authenticated
- *     for its From domain, so this never piles onto an already-failing message
- *     (the unauthenticatedFromSpoof composite and the base auth/consistency
- *     signals cover those).
+ *   - the From domain genuinely authenticated: either anyAuthAligned === true (an
+ *     aligned, trusted, passing SPF/DKIM identifier backs the From) or a trusted
+ *     verifier reported a DMARC pass for the visible From — even an aggregate
+ *     `dmarc=pass header.from=From` with no SPF/DKIM method rows, which DMARC only
+ *     emits when an aligned identifier satisfied the From's policy. This never
+ *     piles onto an already-failing message (the unauthenticatedFromSpoof composite
+ *     and the base auth/consistency signals cover those), and it matches how that
+ *     composite already treats the aligned DMARC-only pass as authenticating the
+ *     From.
  *   - displayName.containsEmail && embeddedDomainMatchesFromDomain === false: the
  *     display name contains an email-like address whose domain differs from the
  *     authenticated From domain — the address-in-display-name shape, computed by
@@ -45,8 +50,28 @@ export const authenticatedDisplayNameSpoofRule: CompositeRule = {
   description:
     "A message that authenticates for its From domain carries a display name addressing a different domain.",
   evaluate({ metrics }): Signal[] {
-    const { authentication } = metrics;
-    if (authentication.anyAuthAligned !== true) return [];
+    const { authentication, fromDomain } = metrics;
+    // The From domain counts as authenticated when an aligned, trusted, passing
+    // SPF/DKIM identifier backs it (anyAuthAligned), or when a trusted verifier
+    // reports a DMARC pass for the *visible* From even though the same header omits
+    // the SPF/DKIM method lines anyAuthAligned is computed from (a bare
+    // `dmarc=pass header.from=From` aggregate leaves anyAuthAligned vacuously
+    // false). DMARC passes only when an aligned SPF or DKIM identifier satisfied the
+    // From domain's policy, so the aggregate likewise authenticates the From — this
+    // mirrors the suppression in the unauthenticatedFromSpoof composite. Only a pass
+    // whose header.from equals the visible From counts: a trusted pass for a
+    // different header.from is the dmarc.headerFromMismatch spoof tell, and an
+    // untrusted pass is forge-able.
+    const hasAlignedTrustedDmarcPass = authentication.dmarcResults.some(
+      (result) =>
+        result.trusted &&
+        result.result === "pass" &&
+        result.headerFrom !== null &&
+        result.headerFrom === fromDomain,
+    );
+    if (authentication.anyAuthAligned !== true && !hasAlignedTrustedDmarcPass) {
+      return [];
+    }
 
     const { displayName } = metrics.senderIdentity;
     if (!displayName.containsEmail) return [];
