@@ -331,6 +331,63 @@ by a single aligned identifier — so a message with one aligned author-domain
 signature plus a third-party signer has `anyAlignedDkimPass = true` but
 `dkimAlignedWithFrom = false`.
 
+## Sender-identity metrics
+
+`MessageMetrics.senderIdentity` (`SenderIdentityMetrics`) is a serializable view
+of the *shape* of the sender's identity, derived from the `From` mailbox and the
+`Message-ID` domain. Like every metric here it carries **no scoring and no
+verdict** — it exposes facts a caller can combine with its own thresholds.
+
+| Field | Meaning |
+|---|---|
+| `displayName` | Structure of the `From` display name (see below). |
+| `localPart` | The `From` address local part, or `null` when From has no parseable address. |
+| `localPartLexical` / `fromDomainLexical` | Lexical profile of the local part / From domain: `{ length, digitCount, hyphenCount, hasNonAscii }` (counts are codepoint-based). `null` when the part is absent. |
+| `fromDomainParts` / `messageIdDomainParts` | Label decomposition of the From / Message-ID domain (see below). `null` when absent. |
+| `messageIdRegistrableDomainMatchesFromDomain` | Whether Message-ID and From share a registrable domain. Requires a resolver (see below); `null` otherwise. |
+
+`displayName` (`DisplayNameMetrics`) reports `present`, the unquoted `text`, its
+codepoint `length`, `hasNonAscii`, and — the attacker-relevant part — whether the
+display name itself contains an email address (`containsEmail`), the
+`embeddedDomains` found in it, and `embeddedDomainMatchesFromDomain`. The last is
+`false` for the classic *address-in-display-name* spoof, e.g.
+`From: "service@paypal.com" <attacker@evil.test>`, where a client may surface only
+the brand address while the real sender is elsewhere. It is `null` when there is
+nothing to compare, so a plain display name never reads as a mismatch.
+
+`fromDomainParts` / `messageIdDomainParts` (`DomainParts`) split a domain into its
+dot-separated `labels` (with `labelCount` and `topLabel`). These need no external
+data. The `registrableDomain` and `subdomainDepth` fields, and
+`messageIdRegistrableDomainMatchesFromDomain`, are **only** populated when the
+caller supplies a registrable-domain resolver — see below.
+
+### Registrable-domain metrics and the PSL boundary
+
+Deciding where the registrable (organizational) domain boundary falls — e.g.
+`example.co.uk` vs `example.com` — cannot be done correctly without
+[Public Suffix List](https://publicsuffix.org/) data. **This package bundles no
+PSL, brand list, or word list** (see `AGENTS.md` / `NOTICE`), so it never guesses
+that boundary. Instead the caller may inject a resolver as a non-serializable
+dependency — kept out of the JSON-serializable `AnalyzeInput`, exactly like
+`Rule`s:
+
+```ts
+import { analyzeMessage } from "mail-auth-signal";
+
+const result = analyzeMessage(input, undefined, {
+  // Supply your own PSL-backed lookup; the core bundles none.
+  getRegistrableDomain: (domain) => myPsl.getDomain(domain) ?? null,
+});
+result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain;
+```
+
+The resolver should return an already-normalized (lower-cased) registrable domain,
+or `null` when it cannot resolve one. Without it, the registrable-domain fields
+stay `null` and the label-based fields are still populated. This complements the
+exact-match consistency metrics: a caller with PSL data can treat an ESP subdomain
+(`mailer.example.com` vs `example.com`) as same-organization, where the exact
+`messageIdDomainMatchesFromDomain` reads as a mismatch.
+
 ## CLI example — stdin scoring
 
 `examples/score-stdin.mjs` reads a raw email from stdin, parses its headers,
@@ -381,6 +438,7 @@ This repository is in early development. Implemented so far:
 - DKIM signing-domain consistency (passing `header.d` vs From)
 - DMARC From-domain consistency (trusted, passing `header.from` vs the visible From)
 - Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
+- Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and an optional registrable-domain comparison via a caller-supplied PSL resolver (no list bundled)
 
 The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 

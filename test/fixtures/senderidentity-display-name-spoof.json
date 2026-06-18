@@ -1,0 +1,40 @@
+{
+  "description": "Suspicious sender: the From display name is itself an address at a recognizable brand (\"security@paypal.com\") while the real address is at an unrelated domain (attacker@evil.test). A mail client may surface only the display-name address, so this is a classic address-in-display-name spoof. containsEmail is true, embeddedDomains carries paypal.com, and embeddedDomainMatchesFromDomain is false because the embedded brand domain differs from the real From domain evil.test. The metric reports the shape only; it emits no verdict.",
+  "input": {
+    "headers": {
+      "from": "\"security@paypal.com\" <attacker@evil.test>",
+      "message-id": "<m1@evil.test>"
+    }
+  },
+  "expected": {
+    "displayName": {
+      "present": true,
+      "text": "security@paypal.com",
+      "length": 19,
+      "hasNonAscii": false,
+      "containsEmail": true,
+      "embeddedDomains": ["paypal.com"],
+      "embeddedDomainMatchesFromDomain": false
+    },
+    "localPart": "attacker",
+    "localPartLexical": { "length": 8, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+    "fromDomainLexical": { "length": 9, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+    "fromDomainParts": {
+      "domain": "evil.test",
+      "labels": ["evil", "test"],
+      "labelCount": 2,
+      "topLabel": "test",
+      "registrableDomain": null,
+      "subdomainDepth": null
+    },
+    "messageIdDomainParts": {
+      "domain": "evil.test",
+      "labels": ["evil", "test"],
+      "labelCount": 2,
+      "topLabel": "test",
+      "registrableDomain": null,
+      "subdomainDepth": null
+    },
+    "messageIdRegistrableDomainMatchesFromDomain": null
+  }
+}

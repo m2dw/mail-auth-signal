@@ -1,0 +1,188 @@
+import { describe, expect, it } from "vitest";
+import {
+  analyzeMessage,
+  computeDomainParts,
+  computeLexicalStats,
+  computeSenderIdentity,
+  extractEmbeddedDomains,
+  extractMetrics,
+  parseFromMailbox,
+} from "../src/index.js";
+import type { AnalyzeInput, MetricsDependencies, SenderIdentityMetrics } from "../src/index.js";
+import benign from "./fixtures/senderidentity-benign.json" with { type: "json" };
+import spoof from "./fixtures/senderidentity-display-name-spoof.json" with { type: "json" };
+
+/** A tiny stand-in Public Suffix List resolver; the core bundles none. */
+const PSL: Record<string, string> = {
+  "example.com": "example.com",
+  "mailer.example.com": "example.com",
+  "news.mail.example.co.uk": "example.co.uk",
+  "evil.test": "evil.test",
+};
+const deps: MetricsDependencies = { getRegistrableDomain: (domain) => PSL[domain] ?? null };
+
+describe("senderIdentity — serializable fixtures (benign and suspicious)", () => {
+  for (const fixture of [benign, spoof]) {
+    it(`matches fixture: ${fixture.description.slice(0, 48)}…`, () => {
+      const senderIdentity = analyzeMessage(fixture.input).metrics.senderIdentity;
+      const roundTripped: SenderIdentityMetrics = JSON.parse(JSON.stringify(senderIdentity));
+      expect(roundTripped).toEqual(fixture.expected);
+    });
+  }
+});
+
+describe("computeLexicalStats — structural counts only, codepoint-based", () => {
+  it("counts length, digits, and hyphens", () => {
+    expect(computeLexicalStats("secure-login-2024")).toEqual({
+      length: 17,
+      digitCount: 4,
+      hyphenCount: 2,
+      hasNonAscii: false,
+    });
+  });
+
+  it("flags non-ASCII and measures by codepoint, not UTF-16 unit", () => {
+    // "café" is 4 codepoints; the é is non-ASCII.
+    expect(computeLexicalStats("café")).toEqual({
+      length: 4,
+      digitCount: 0,
+      hyphenCount: 0,
+      hasNonAscii: true,
+    });
+  });
+});
+
+describe("computeDomainParts — labels always, registrable only with a resolver", () => {
+  it("decomposes labels without any external data", () => {
+    expect(computeDomainParts("mail.example.com")).toEqual({
+      domain: "mail.example.com",
+      labels: ["mail", "example", "com"],
+      labelCount: 3,
+      topLabel: "com",
+      registrableDomain: null,
+      subdomainDepth: null,
+    });
+  });
+
+  it("reports the registrable domain and subdomain depth when a resolver is supplied", () => {
+    expect(computeDomainParts("news.mail.example.co.uk", deps.getRegistrableDomain)).toEqual({
+      domain: "news.mail.example.co.uk",
+      labels: ["news", "mail", "example", "co", "uk"],
+      labelCount: 5,
+      topLabel: "uk",
+      registrableDomain: "example.co.uk",
+      subdomainDepth: 2,
+    });
+  });
+
+  it("leaves registrable fields null when the resolver cannot resolve the domain", () => {
+    const parts = computeDomainParts("unknown.example.org", deps.getRegistrableDomain);
+    expect(parts.registrableDomain).toBeNull();
+    expect(parts.subdomainDepth).toBeNull();
+  });
+});
+
+describe("extractEmbeddedDomains — addresses hidden in free text", () => {
+  it("pulls every normalized domain from an address-shaped fragment", () => {
+    expect(extractEmbeddedDomains("security@paypal.com")).toEqual(["paypal.com"]);
+  });
+
+  it("returns an empty array for text with no address", () => {
+    expect(extractEmbeddedDomains("Example Support Team")).toEqual([]);
+  });
+});
+
+describe("parseFromMailbox — domain agrees with the canonical extractor", () => {
+  it("splits display name, local part, and domain", () => {
+    expect(parseFromMailbox("Example Sender <notice@example.com>")).toEqual({
+      displayName: "Example Sender",
+      localPart: "notice",
+      domain: "example.com",
+    });
+  });
+
+  it("does not fabricate a domain or local part from a multi-'@' angle-addr", () => {
+    expect(parseFromMailbox("<a@b@example.com>")).toEqual({
+      displayName: null,
+      localPart: null,
+      domain: null,
+    });
+  });
+});
+
+describe("senderIdentity — display-name address spoof", () => {
+  it("surfaces an embedded brand domain that differs from the real From domain", () => {
+    const metrics = extractMetrics({
+      headers: { from: '"security@paypal.com" <attacker@evil.test>' },
+    });
+    const si = metrics.senderIdentity;
+    expect(si.displayName.containsEmail).toBe(true);
+    expect(si.displayName.embeddedDomains).toEqual(["paypal.com"]);
+    expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
+    expect(si.localPart).toBe("attacker");
+    expect(metrics.fromDomain).toBe("evil.test");
+  });
+});
+
+describe("senderIdentity — lexical anomalies are reported, not judged", () => {
+  it("counts digits and hyphens in a lookalike domain", () => {
+    const si = extractMetrics({
+      headers: { from: "Account <secure@paypa1-login.com>" },
+    }).senderIdentity;
+    expect(si.fromDomainLexical).toEqual({
+      length: 16,
+      digitCount: 1,
+      hyphenCount: 1,
+      hasNonAscii: false,
+    });
+  });
+
+  it("flags a non-ASCII (raw IDN) domain and display name", () => {
+    const si = extractMetrics({
+      headers: { from: '"Stürmer" <kunde@stürmer-bank.example>' },
+    }).senderIdentity;
+    expect(si.displayName.hasNonAscii).toBe(true);
+    expect(si.fromDomainLexical?.hasNonAscii).toBe(true);
+    expect(si.fromDomainLexical?.hyphenCount).toBe(1);
+  });
+});
+
+describe("senderIdentity — registrable-domain comparison requires a resolver", () => {
+  const message = (messageId: string): AnalyzeInput => ({
+    headers: { from: "Example Sender <notice@example.com>", "message-id": messageId },
+  });
+
+  it("is null without a resolver even when an exact comparison is possible", () => {
+    const result = analyzeMessage(message("<x@mailer.example.com>"));
+    expect(result.metrics.messageIdDomainMatchesFromDomain).toBe(false);
+    expect(result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain).toBeNull();
+  });
+
+  it("treats an ESP subdomain as same-organization when a resolver is supplied", () => {
+    const result = analyzeMessage(message("<x@mailer.example.com>"), undefined, deps);
+    // Exact comparison still reads as a mismatch …
+    expect(result.metrics.messageIdDomainMatchesFromDomain).toBe(false);
+    // … but the registrable-domain comparison recognizes the shared organization.
+    expect(result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain).toBe(true);
+  });
+
+  it("reports false when the registrable domains genuinely differ", () => {
+    const result = analyzeMessage(message("<x@evil.test>"), undefined, deps);
+    expect(result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain).toBe(false);
+  });
+});
+
+describe("senderIdentity — missing From stays silent (all null)", () => {
+  it("reports nulls for every From-derived field when From is absent", () => {
+    const si = computeSenderIdentity(null, null, "mailer.example.net");
+    expect(si.localPart).toBeNull();
+    expect(si.localPartLexical).toBeNull();
+    expect(si.fromDomainLexical).toBeNull();
+    expect(si.fromDomainParts).toBeNull();
+    expect(si.displayName.present).toBe(false);
+    expect(si.displayName.text).toBeNull();
+    expect(si.displayName.length).toBe(0);
+    // The Message-ID domain still decomposes.
+    expect(si.messageIdDomainParts?.labelCount).toBe(3);
+  });
+});

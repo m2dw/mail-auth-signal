@@ -287,6 +287,90 @@ export function allDomainsMatch(reference: string | null, domains: string[]): bo
   return domains.every((domain) => domain === reference);
 }
 
+/**
+ * Parse a From-style mailbox into its display name, local part, and domain.
+ *
+ * Domain extraction mirrors extractDomainFromMailbox exactly — RFC 5322 comments
+ * are stripped first (so an attacker domain hidden in a comment cannot be pulled
+ * out), an angle-addr is preferred, then a bare addr-spec — so the parsed domain
+ * here always agrees with the canonical MessageMetrics.fromDomain. The local part
+ * is captured from the *same* match, so it stays paired with the domain it
+ * actually belongs to rather than being lifted from unrelated text. When the
+ * domain does not normalize to a real dotted host, neither a domain nor a local
+ * part is reported, so a malformed value never yields a half-parsed address.
+ *
+ * The display name is the phrase before the angle-addr, with surrounding quotes
+ * removed and backslash escapes unfolded. It is returned verbatim (only
+ * trimmed/unquoted) so display-name metrics can inspect what a reader would see —
+ * including an address-shaped display name like `"service@paypal.com"`.
+ */
+export function parseFromMailbox(value: string | null): {
+  displayName: string | null;
+  localPart: string | null;
+  domain: string | null;
+} {
+  if (!value) return { displayName: null, localPart: null, domain: null };
+
+  const withoutComments = stripComments(value);
+
+  const angleMatch = /<([^<>@\s]+)@([^<>@\s]+)>/.exec(withoutComments);
+  let localPartRaw: string | null = null;
+  let domainRaw: string | null = null;
+  let displayName: string | null = null;
+
+  if (angleMatch) {
+    localPartRaw = angleMatch[1] ?? null;
+    domainRaw = angleMatch[2] ?? null;
+    const lt = withoutComments.indexOf("<");
+    displayName = lt > 0 ? unquoteDisplayName(withoutComments.slice(0, lt)) : null;
+  } else {
+    const bare = /([^<>@\s]+)@([^<>@\s,;]+)/.exec(withoutComments);
+    if (bare) {
+      localPartRaw = bare[1] ?? null;
+      domainRaw = bare[2] ?? null;
+    }
+  }
+
+  const domain = normalizeDomain(domainRaw);
+  // A local part is only meaningful next to a real domain; if the domain did not
+  // normalize to a dotted host, report neither rather than a half-parsed address.
+  const localPart = domain && localPartRaw ? localPartRaw : null;
+  return { displayName: displayName && displayName.length ? displayName : null, localPart, domain };
+}
+
+/**
+ * Strip a single layer of surrounding double quotes from a display-name phrase
+ * and unfold backslash escapes, then trim. Used only for display-name reporting,
+ * never for address extraction.
+ */
+function unquoteDisplayName(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/\\(.)/g, "$1").trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Extract every normalized domain that appears inside an arbitrary text fragment
+ * as part of an email-like `local@domain` token — used to surface addresses
+ * embedded in a From display name (e.g. `"service@paypal.com"`). Each match's
+ * domain is normalized and dotless/unparseable hosts are dropped; duplicates are
+ * removed while preserving encounter order. Returns an empty array for null,
+ * empty, or address-free text.
+ */
+export function extractEmbeddedDomains(text: string | null): string[] {
+  if (!text) return [];
+  const domains: string[] = [];
+  const pattern = /[^\s<>@,;"']+@([A-Za-z0-9.-]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const domain = normalizeDomain(match[1] ?? null);
+    if (domain) domains.push(domain);
+  }
+  return [...new Set(domains)];
+}
+
 function normalizeDomain(value: string | null): string | null {
   if (!value) return null;
   const trimmed = value.trim().replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();

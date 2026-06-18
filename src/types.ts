@@ -193,6 +193,156 @@ export type AuthenticationAlignment = {
 };
 
 /**
+ * Lexical statistics for a single string token (a local part or a domain),
+ * computed without any external word list, brand dictionary, or other bundled
+ * data — only structural facts an attacker cannot launder away by choosing a
+ * benign-looking domain. Callers combine these with their own thresholds; the
+ * core forms no opinion. All counts are codepoint-based so a Unicode/IDN value
+ * is measured by what a reader sees, not by its UTF-16 unit count.
+ *
+ * - length:      number of Unicode codepoints.
+ * - digitCount:  number of ASCII digits (0-9). A high ratio is a weak hint of a
+ *                machine-generated or obfuscated identifier.
+ * - hyphenCount: number of '-' characters. Hyphen-heavy hosts (e.g.
+ *                "paypal-secure-login") are a common phishing pattern.
+ * - hasNonAscii: whether any codepoint is outside ASCII (> U+007F). A true value
+ *                flags a raw IDN / possible homoglyph host the caller may want to
+ *                punycode-normalize before trusting; the core never guesses intent.
+ */
+export type LexicalStats = {
+  length: number;
+  digitCount: number;
+  hyphenCount: number;
+  hasNonAscii: boolean;
+};
+
+/**
+ * Structural decomposition of a domain into its dot-separated labels, plus an
+ * optional registrable-domain view.
+ *
+ * The label-based fields (labels/labelCount/topLabel) need no external data and
+ * are always populated. The registrable-domain fields require a caller-supplied
+ * Public Suffix List resolver (MetricsDependencies.getRegistrableDomain) because
+ * deciding where the registrable boundary falls (e.g. "co.uk" vs "com") cannot be
+ * done correctly without PSL data, which this package intentionally does not
+ * bundle (see the licensing boundary in NOTICE / AGENTS.md). When no resolver is
+ * supplied — the default — those fields stay null rather than being guessed.
+ *
+ * - domain:             the normalized domain these parts describe.
+ * - labels:             dot-separated labels, left to right (e.g.
+ *                       ["mail","example","com"]).
+ * - labelCount:         number of labels — the raw subdomain depth.
+ * - topLabel:           the rightmost label (a syntactic TLD-ish label, with no
+ *                       PSL applied, so "co" for "example.co.uk").
+ * - registrableDomain:  the registrable (organizational) domain when a resolver
+ *                       supplied one, else null.
+ * - subdomainDepth:     labels appearing above the registrable domain (0 when the
+ *                       domain *is* its registrable domain), else null when no
+ *                       resolver supplied a registrable domain.
+ */
+export type DomainParts = {
+  domain: string;
+  labels: string[];
+  labelCount: number;
+  topLabel: string;
+  registrableDomain: string | null;
+  subdomainDepth: number | null;
+};
+
+/**
+ * Metrics derived from the From header's display name (the human-readable phrase
+ * before the angle-addr, e.g. `Example Support` in
+ * `Example Support <a@example.com>`).
+ *
+ * The attacker-relevant pattern these capture, without any caller-specific
+ * policy, is a display name that itself looks like an email address at a
+ * different domain — e.g. From: `"service@paypal.com" <attacker@evil.test>`,
+ * where a mail client may surface only `service@paypal.com` while the real
+ * sender is evil.test. embeddedDomains/containsEmail/embeddedDomainMatchesFromDomain
+ * expose exactly that without deciding it is malicious.
+ *
+ * - present:     whether a non-empty display name was parsed.
+ * - text:        the unquoted display-name text, or null when absent.
+ * - length:      codepoint length of text (0 when absent).
+ * - hasNonAscii: whether the display name contains a non-ASCII codepoint.
+ * - containsEmail: whether the display name contains an email-like address (i.e.
+ *                  embeddedDomains is non-empty).
+ * - embeddedDomains: every normalized domain found inside the display name, in
+ *                    encounter order and deduplicated. Empty when none.
+ * - embeddedDomainMatchesFromDomain: whether every embedded domain matches the
+ *                  From domain. null when no comparison was possible (no embedded
+ *                  domain, or no From domain); false when any embedded domain
+ *                  differs from From — the address-in-display-name spoof shape.
+ */
+export type DisplayNameMetrics = {
+  present: boolean;
+  text: string | null;
+  length: number;
+  hasNonAscii: boolean;
+  containsEmail: boolean;
+  embeddedDomains: string[];
+  embeddedDomainMatchesFromDomain: boolean | null;
+};
+
+/**
+ * Sender-identity metrics derived from the From mailbox and the Message-ID
+ * domain: display-name structure, the From local part and domain lexical
+ * profiles, label-based domain decomposition, and (only when a PSL resolver is
+ * supplied) a registrable-domain comparison between Message-ID and From.
+ *
+ * These are pure, serializable facts with no scoring applied — the caller owns
+ * thresholds and policy. They complement the exact-match consistency metrics
+ * (e.g. messageIdDomainMatchesFromDomain): the registrable-domain comparison here
+ * lets a caller with PSL data treat an ESP subdomain as same-organization rather
+ * than a bare mismatch, while the lexical/structural fields surface the shape of
+ * the identity itself.
+ *
+ * - displayName:      see DisplayNameMetrics.
+ * - localPart:        the From address local part, or null when From has no
+ *                     parseable address. Reported only alongside a real From
+ *                     domain so it always pairs with fromDomainParts.
+ * - localPartLexical: lexical profile of localPart, or null when absent.
+ * - fromDomainLexical: lexical profile of the From domain, or null when absent.
+ * - fromDomainParts:  label decomposition of the From domain, or null when absent.
+ * - messageIdDomainParts: label decomposition of the Message-ID domain, or null
+ *                     when absent.
+ * - messageIdRegistrableDomainMatchesFromDomain: whether the Message-ID and From
+ *                     domains share a registrable domain. Requires a resolver;
+ *                     null when none is supplied, either domain is absent, or
+ *                     either has no registrable form. true/false otherwise.
+ */
+export type SenderIdentityMetrics = {
+  displayName: DisplayNameMetrics;
+  localPart: string | null;
+  localPartLexical: LexicalStats | null;
+  fromDomainLexical: LexicalStats | null;
+  fromDomainParts: DomainParts | null;
+  messageIdDomainParts: DomainParts | null;
+  messageIdRegistrableDomainMatchesFromDomain: boolean | null;
+};
+
+/**
+ * Non-serializable runtime dependencies for metric extraction.
+ *
+ * Like Rules, these are *code, not data*, so they travel as a separate argument
+ * to extractMetrics/analyzeMessage and never inside the JSON-serializable
+ * AnalyzeInput — keeping the input contract serializable while still allowing a
+ * caller to inject capabilities the core must not bundle.
+ *
+ * - getRegistrableDomain: maps a normalized domain to its registrable
+ *   (organizational) domain — the label below the public suffix, e.g.
+ *   "mail.corp.example.co.uk" -> "example.co.uk". Supplied by the caller because
+ *   computing it correctly requires Public Suffix List data, which this package
+ *   intentionally does not bundle (license boundary; see AGENTS.md / NOTICE).
+ *   Return null when the domain has no registrable form or the caller cannot
+ *   resolve it; the registrable-domain metrics then stay null rather than guessed.
+ *   The resolver should return an already-normalized (lower-cased) domain.
+ */
+export type MetricsDependencies = {
+  getRegistrableDomain?: (domain: string) => string | null;
+};
+
+/**
  * Extracted facts about a single message. All values are serializable so they
  * can be logged, written to fixtures, or sent across process boundaries.
  */
@@ -294,6 +444,13 @@ export type MessageMetrics = {
    * fields above for callers that want the consolidated authentication picture.
    */
   authentication: AuthenticationAlignment;
+  /**
+   * Sender-identity metrics derived from the From mailbox and the Message-ID
+   * domain (display-name structure, local-part/domain lexical profiles, label
+   * decomposition, and an optional registrable-domain comparison). Pure facts
+   * with no scoring applied. See SenderIdentityMetrics.
+   */
+  senderIdentity: SenderIdentityMetrics;
   authenticationResults: AuthenticationResultsHeader[];
 };
 

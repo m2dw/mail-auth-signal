@@ -48,6 +48,37 @@
         "dmarcPass": false,
         "anyAuthAligned": false
       },
+      "senderIdentity": {
+        "displayName": {
+          "present": true,
+          "text": "Example Sender",
+          "length": 14,
+          "hasNonAscii": false,
+          "containsEmail": false,
+          "embeddedDomains": [],
+          "embeddedDomainMatchesFromDomain": null
+        },
+        "localPart": "notice",
+        "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdRegistrableDomainMatchesFromDomain": null
+      },
       "authenticationResults": [
         {
           "raw": "mx.example.net; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=example.com; dkim=fail header.d=example.com",
