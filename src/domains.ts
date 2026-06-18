@@ -362,7 +362,10 @@ function unquoteDisplayName(value: string): string {
 export function extractEmbeddedDomains(text: string | null): string[] {
   if (!text) return [];
   const domains: string[] = [];
-  const pattern = /[^\s<>@,;"']+@([A-Za-z0-9.-]+)/g;
+  // The domain class admits Unicode letters/digits (not just ASCII) so that raw
+  // IDN and homoglyph domains in a display name — e.g. `"support@раураl.com"` —
+  // are still captured; normalizeDomain handles lowercasing and dotted-host checks.
+  const pattern = /[^\s<>@,;"']+@([\p{L}\p{N}.-]+)/gu;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
     const domain = normalizeDomain(match[1] ?? null);

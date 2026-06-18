@@ -90,6 +90,12 @@ describe("extractEmbeddedDomains — addresses hidden in free text", () => {
   it("returns an empty array for text with no address", () => {
     expect(extractEmbeddedDomains("Example Support Team")).toEqual([]);
   });
+
+  it("captures a raw IDN / homoglyph domain instead of stopping at the first non-ASCII byte", () => {
+    // "раураl" is Cyrillic homoglyphs of the Latin brand; an ASCII-only capture
+    // would never reach the dotted host.
+    expect(extractEmbeddedDomains("support@раураl.com")).toEqual(["раураl.com"]);
+  });
 });
 
 describe("parseFromMailbox — domain agrees with the canonical extractor", () => {
@@ -120,6 +126,17 @@ describe("senderIdentity — display-name address spoof", () => {
     expect(si.displayName.embeddedDomains).toEqual(["paypal.com"]);
     expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
     expect(si.localPart).toBe("attacker");
+    expect(metrics.fromDomain).toBe("evil.test");
+  });
+
+  it("surfaces an embedded homoglyph IDN domain hidden in the display name", () => {
+    const metrics = extractMetrics({
+      headers: { from: '"support@раураl.com" <attacker@evil.test>' },
+    });
+    const si = metrics.senderIdentity;
+    expect(si.displayName.containsEmail).toBe(true);
+    expect(si.displayName.embeddedDomains).toEqual(["раураl.com"]);
+    expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
     expect(metrics.fromDomain).toBe("evil.test");
   });
 });
