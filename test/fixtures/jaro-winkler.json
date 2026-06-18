@@ -1,0 +1,68 @@
+{
+  "description": "Hand-computed cases for computeJaro and computeJaroWinkler. All expected values are derived from the algorithm definition rather than echoed from the implementation, so the fixture independently verifies the arithmetic. Floating-point results are rounded to 4 decimal places. Wikipedia benchmark cases (MARTHA/MARHTA, DWAYNE/DUANE, DIXON/DICKSONX) are included as a cross-check against the published reference values.",
+  "cases": [
+    {
+      "label": "two empty strings are identical — returns 1 via a === b shortcut",
+      "a": "",
+      "b": "",
+      "jaro": 1,
+      "jaroWinkler": 1
+    },
+    {
+      "label": "empty vs non-empty — no characters to match",
+      "a": "",
+      "b": "hello",
+      "jaro": 0,
+      "jaroWinkler": 0
+    },
+    {
+      "label": "non-empty vs empty — no characters to match",
+      "a": "hello",
+      "b": "",
+      "jaro": 0,
+      "jaroWinkler": 0
+    },
+    {
+      "label": "identical single character",
+      "a": "x",
+      "b": "x",
+      "jaro": 1,
+      "jaroWinkler": 1
+    },
+    {
+      "label": "identical multi-character string",
+      "a": "example",
+      "b": "example",
+      "jaro": 1,
+      "jaroWinkler": 1
+    },
+    {
+      "label": "completely dissimilar strings — no characters in common within any window",
+      "a": "abc",
+      "b": "xyz",
+      "jaro": 0,
+      "jaroWinkler": 0
+    },
+    {
+      "label": "Wikipedia benchmark: MARTHA / MARHTA — m=6, t=1 (T↔H transposition), l=3",
+      "a": "MARTHA",
+      "b": "MARHTA",
+      "jaro": 0.9444,
+      "jaroWinkler": 0.9611
+    },
+    {
+      "label": "Wikipedia benchmark: DWAYNE / DUANE — m=4, t=0, l=1",
+      "a": "DWAYNE",
+      "b": "DUANE",
+      "jaro": 0.8222,
+      "jaroWinkler": 0.84
+    },
+    {
+      "label": "Wikipedia benchmark: DIXON / DICKSONX — m=4, t=0, l=2",
+      "a": "DIXON",
+      "b": "DICKSONX",
+      "jaro": 0.7667,
+      "jaroWinkler": 0.8133
+    }
+  ]
+}

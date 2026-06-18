@@ -6,7 +6,7 @@
 
 Mail Auth Signal is a lightweight sender-risk signal engine for email authentication results and header consistency analysis.
 
-It is the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. A per-module audit of the add-on's `src/core/*.js` files (see [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md) and [Migration status](#migration-status)) finds that most reusable detection logic has been migrated here, with one pure helper — Jaro-Winkler string similarity — still classified *Needs migration*. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
+It is the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. A per-module audit of the add-on's `src/core/*.js` files (see [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md) and [Migration status](#migration-status)) confirms that all reusable detection logic has been migrated here. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
 
 ## Goals
 
@@ -480,6 +480,32 @@ a language-frequency dataset, and bundling one would cross the data/license
 boundary this package keeps clear (see `AGENTS.md` / `NOTICE`). A caller with its
 own licensed corpus can layer that on top of these metrics.
 
+## Jaro-Winkler string similarity
+
+`computeJaro(a, b)` and `computeJaroWinkler(a, b, prefixScalingFactor?)` are
+exported helpers that compute string similarity, ported from the Thunderbird Auth
+Results Filter add-on so downstream callers can retire their local copies. Both
+return a value in `[0, 1]` (1 = identical, 0 = nothing in common), rounded to 4
+decimal places for stable fixture comparison.
+
+```ts
+import { computeJaro, computeJaroWinkler } from "mail-auth-signal";
+
+computeJaro("MARTHA", "MARHTA");        // 0.9444
+computeJaroWinkler("MARTHA", "MARHTA"); // 0.9611 — prefix bonus for shared "MAR"
+computeJaroWinkler("a", "b", 0);        // same as computeJaro (no prefix bonus)
+```
+
+| Function | Description |
+|---|---|
+| `computeJaro(a, b)` | Jaro similarity. Counts characters that match within a window of `⌊max(|a|, |b|) / 2⌋ − 1` positions and penalises transpositions. |
+| `computeJaroWinkler(a, b, p?)` | Extends Jaro with a prefix bonus: up to 4 shared leading characters increase the score by `p × prefixLength × (1 − jaro)`. Default `p = 0.1`; keep `p ≤ 0.25` to stay in `[0, 1]`. |
+
+**Policy-neutral.** These helpers form no opinion on what similarity score is
+"suspicious" — that threshold belongs to the caller. Both functions are
+codepoint-based (a multi-byte Unicode character counts as one unit) and consult no
+external word list, brand dictionary, or corpus.
+
 ## CLI example — stdin scoring
 
 `examples/score-stdin.mjs` reads a raw email from stdin, parses its headers,
@@ -520,13 +546,10 @@ downgraded to `low` severity.
 The Thunderbird Auth Results Filter add-on's core modules (`src/core/*.js`) were
 audited file by file in [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md), which
 classifies each as *Migrated*, *Not core* (caller-owned), *Needs migration*, or
-*Needs decision*. Most reusable core is **migrated** (listed below). The
-migration is **not** complete: one pure, data-free helper —
-**`jaroWinkler.js`** (Jaro-Winkler string similarity) — is classified *Needs
-migration* and tracked as a follow-up issue, and **`bigramNaturalness.js`** is
-*Needs decision* because it needs a license-cleared language-frequency corpus.
-Future add-on logic will be evaluated case by case against that same
-classification.
+*Needs decision*. All reusable core is now **migrated** (listed below).
+**`bigramNaturalness.js`** is *Needs decision* because it needs a license-cleared
+language-frequency corpus. Future add-on logic will be evaluated case by case
+against that same classification.
 
 Migrated core (pure parsing, metrics, signals — no UI, storage, mailbox actions,
 network, or scoring policy):
@@ -544,6 +567,7 @@ network, or scoring policy):
 - Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
 - Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and an optional registrable-domain comparison via a caller-supplied PSL resolver (no list bundled)
 - Richer lexical heuristics helper (`computeLexicalHeuristics`): entropy, normalized entropy, vowel ratio, max consonant/repeated runs, unique-character ratio, and letter/digit transitions — data-free and policy-neutral
+- **Jaro-Winkler string similarity** (`computeJaro`, `computeJaroWinkler`): data-free, policy-neutral similarity primitive (see [Jaro-Winkler string similarity](#jaro-winkler-string-similarity))
 - Composite (Layer 4) signals combining the base layers (opt-in)
 
 Add-on behavior that is intentionally **not** migrated — UI, notifications,
@@ -552,11 +576,9 @@ the caller-owned policy modules `customFormulas.js`, `whitelist.js`, `scoring.js
 plus bundled PSL/brand/word-list data — stays caller-owned by the boundary in
 [`AGENTS.md`](./AGENTS.md).
 
-Open items in the audit: one **pending core port** — `jaroWinkler.js` (*Needs
-migration*, tracked as a follow-up issue) — and one **license decision** —
-whether to ever bundle the language-frequency corpus that `bigramNaturalness.js`
-would require (*Needs decision*). The standing PSL/reference-data boundary remains
-caller-owned.
+Open items in the audit: one **license decision** — whether to ever bundle the
+language-frequency corpus that `bigramNaturalness.js` would require (*Needs
+decision*). The standing PSL/reference-data boundary remains caller-owned.
 
 ## License
 
