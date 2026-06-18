@@ -68,6 +68,131 @@ export type Signal = {
 };
 
 /**
+ * One DMARC result observed in an Authentication-Results header (Layer 1: the
+ * raw authentication outcome, before any alignment interpretation).
+ *
+ * - result:     the verifier's verdict token, lower-cased (e.g. "pass", "fail",
+ *               "none", "temperror", "permerror"). Faithfully echoed, never gated.
+ * - headerFrom: the normalized domain of the `header.from` property the verifier
+ *               evaluated, or null when absent or unparseable.
+ * - trusted:    whether the carrying Authentication-Results header's authserv-id
+ *               was declared trusted, so a caller can tell a verifier's own claim
+ *               apart from a forge-able upstream one without re-deriving trust.
+ */
+export type DmarcResult = {
+  result: string;
+  headerFrom: string | null;
+  trusted: boolean;
+};
+
+/**
+ * One SPF result observed in an Authentication-Results header (Layer 1).
+ *
+ * - result:       the verdict token, lower-cased (e.g. "pass", "fail",
+ *                 "softfail", "neutral", "none", "temperror", "permerror").
+ * - smtpMailfrom: the normalized domain of the `smtp.mailfrom` property SPF
+ *                 authenticated, or null when absent, a null `<>`, or unparseable.
+ * - trusted:      whether the carrying header's authserv-id was declared trusted.
+ */
+export type SpfResult = {
+  result: string;
+  smtpMailfrom: string | null;
+  trusted: boolean;
+};
+
+/**
+ * One DKIM result observed in an Authentication-Results header (Layer 1). A
+ * message commonly carries several DKIM signatures (author domain plus a
+ * forwarder or list), so these are reported as a list.
+ *
+ * - result:  the verdict token, lower-cased (e.g. "pass", "fail", "neutral",
+ *            "none", "temperror", "permerror").
+ * - headerD: the normalized signing domain from `header.d`, or null when absent
+ *            or unparseable.
+ * - headerI: the normalized domain of the `header.i` agent/user identity (AUID),
+ *            or null when absent or unparseable. May be a subdomain of headerD.
+ * - trusted: whether the carrying header's authserv-id was declared trusted.
+ */
+export type DkimResult = {
+  result: string;
+  headerD: string | null;
+  headerI: string | null;
+  trusted: boolean;
+};
+
+/**
+ * Authentication and alignment metrics ported from the Thunderbird add-on, split
+ * into the two layers it modeled:
+ *
+ *   - Layer 1 (raw results): the SPF/DKIM/DMARC outcomes exactly as reported,
+ *     each tagged with the trust of its source. No gating — a caller sees every
+ *     claim, trusted or not, and decides what to do with it.
+ *   - Layer 2 (alignment + summary flags): derived booleans answering "is this
+ *     message authenticated and aligned with the visible From?". These are the
+ *     attacker-relevant assertions, so they are computed only from **trusted**
+ *     Authentication-Results headers and only from **passing** results: an
+ *     untrusted header is forge-able and a non-pass result authenticates nothing,
+ *     so neither may make a message read as authenticated. This gating is the
+ *     false-positive/false-negative mitigation — without it, an attacker could
+ *     stamp a fake `spf=pass` / `dkim=pass` in a self-applied header and have the
+ *     summary flags vouch for a spoof.
+ *
+ * Alignment is measured against the visible From domain (MessageMetrics.fromDomain
+ * — the "Header From"), the exact identity DMARC alignment protects. Comparison is
+ * exact, with no Public Suffix List / organizational-domain logic, so a subdomain
+ * of From counts as unaligned (mirroring the existing consistency metrics).
+ *
+ * All values are JSON-serializable for logging, fixtures, and cross-language
+ * comparison.
+ */
+export type AuthenticationAlignment = {
+  /** Count of Authentication-Results headers whose authserv-id was trusted. */
+  trustedHeaderCount: number;
+  /** Count of Authentication-Results headers whose authserv-id was not trusted. */
+  untrustedHeaderCount: number;
+  /** Every DMARC result across all headers, in encounter order (Layer 1). */
+  dmarcResults: DmarcResult[];
+  /** Every SPF result across all headers, in encounter order (Layer 1). */
+  spfResults: SpfResult[];
+  /** Every DKIM result across all headers, in encounter order (Layer 1). */
+  dkimResults: DkimResult[];
+  /**
+   * Whether every trusted, passing SPF `smtp.mailfrom` domain matches the From
+   * domain (SPF alignment, the mechanical basis of DMARC's SPF leg). null when no
+   * comparison was possible (missing From, or no trusted+passing SPF carrying a
+   * smtp.mailfrom domain). false when any such domain differs from From.
+   */
+  spfAlignedWithFrom: boolean | null;
+  /**
+   * Whether every trusted, passing DKIM `header.d` domain matches the From domain
+   * (DKIM alignment, the basis of DMARC's DKIM leg). null when no comparison was
+   * possible (missing From, or no trusted+passing DKIM carrying a header.d). false
+   * when any such signing domain differs from From.
+   */
+  dkimAlignedWithFrom: boolean | null;
+  /**
+   * True when at least one trusted, passing SPF result's smtp.mailfrom matches
+   * From. Distinct from spfAlignedWithFrom: "any" tolerates an additional
+   * non-aligned SPF result, matching how DMARC passes on a single aligned leg.
+   */
+  anyAlignedSpfPass: boolean;
+  /**
+   * True when at least one trusted, passing DKIM signature's header.d matches
+   * From. A message may carry several signatures, and DMARC's DKIM leg passes if
+   * any aligned signature passes; this captures exactly that.
+   */
+  anyAlignedDkimPass: boolean;
+  /** True when at least one trusted DMARC result returned `pass`. */
+  dmarcPass: boolean;
+  /**
+   * True when the message has any aligned, trusted, passing authentication —
+   * anyAlignedSpfPass || anyAlignedDkimPass. This is the DMARC-style summary: a
+   * From domain backed by at least one aligned authenticated identifier.
+   */
+  anyAuthAligned: boolean;
+};
+
+/**
  * Extracted facts about a single message. All values are serializable so they
  * can be logged, written to fixtures, or sent across process boundaries.
  */
@@ -162,6 +287,13 @@ export type MessageMetrics = {
    * than the visible sender.
    */
   dmarcHeaderFromMatchesFromDomain: boolean | null;
+  /**
+   * Ported authentication + alignment metrics (Layer 1 raw results, Layer 2
+   * alignment and summary flags). See AuthenticationAlignment. This is a derived
+   * view over authenticationResults, surfaced alongside the per-comparison match
+   * fields above for callers that want the consolidated authentication picture.
+   */
+  authentication: AuthenticationAlignment;
   authenticationResults: AuthenticationResultsHeader[];
 };
 

@@ -282,6 +282,55 @@ single trusted+passing `header.from` that differs from From is enough to flag
 missing `From`, no trusted+passing DMARC result, or an unparseable `header.from`
 leaves `dmarcHeaderFromMatchesFromDomain` `null` and emits no signal.
 
+## Authentication & alignment metrics
+
+`MessageMetrics.authentication` (`AuthenticationAlignment`) is a consolidated,
+serializable view of the SPF/DKIM/DMARC outcomes, split into the two layers the
+Thunderbird add-on modeled. It is a derived projection of
+`authenticationResults` — no extra parsing, no signals — so callers that want the
+authentication picture without walking each header can read it directly.
+
+### Layer 1 — raw results (faithful, never gated)
+
+| Field | Meaning |
+|---|---|
+| `trustedHeaderCount` / `untrustedHeaderCount` | How many `Authentication-Results` headers came from a trusted vs untrusted authserv-id. |
+| `dmarcResults[]` | Each DMARC result: `{ result, headerFrom, trusted }`. |
+| `spfResults[]` | Each SPF result: `{ result, smtpMailfrom, trusted }`. |
+| `dkimResults[]` | Each DKIM result: `{ result, headerD, headerI, trusted }` (`headerI` is the normalized `header.i` AUID domain). |
+
+Every result is reported in encounter order and tagged with the trust of its
+source header. Nothing is filtered: a `fail`, `softfail`, `none`, or untrusted
+result is still present so a caller sees the complete claim set.
+
+### Layer 2 — alignment & summary flags (trusted + passing only)
+
+| Field | Meaning |
+|---|---|
+| `spfAlignedWithFrom` | Whether every trusted, passing SPF `smtp.mailfrom` matches From. `null` when none to compare. |
+| `dkimAlignedWithFrom` | Whether every trusted, passing DKIM `header.d` matches From. `null` when none to compare. |
+| `anyAlignedSpfPass` | At least one trusted, passing, From-aligned SPF result. |
+| `anyAlignedDkimPass` | At least one trusted, passing, From-aligned DKIM signature (DMARC's DKIM leg passes on any aligned signature). |
+| `dmarcPass` | At least one trusted DMARC `pass`. |
+| `anyAuthAligned` | `anyAlignedSpfPass || anyAlignedDkimPass` — the DMARC-style summary that From is backed by an aligned authenticated identifier. |
+
+**Why Layer 2 is gated.** The summary flags assert "this message is
+authenticated and aligned with the visible From," which is exactly what an
+attacker would want to forge. So they count a result only when it is **passing**
+(a `fail`/`softfail`/`none` authenticates nothing) and comes from a **trusted**
+header (an untrusted `Authentication-Results` header can be stamped by anyone
+upstream). Without both gates, a self-applied `spf=pass` / `dkim=pass` would let
+the flags vouch for a spoof. The raw Layer 1 results stay ungated so that
+forge-able claim is still visible — it just does not move the summary. Alignment
+is measured against `fromDomain` with exact comparison (no PSL/org-domain logic),
+matching the consistency metrics, so a subdomain of From reads as unaligned.
+
+The two views differ deliberately: `*AlignedWithFrom` is an all-match verdict
+(every trusted+passing identifier agrees), while `anyAligned*Pass` is satisfied
+by a single aligned identifier — so a message with one aligned author-domain
+signature plus a third-party signer has `anyAlignedDkimPass = true` but
+`dkimAlignedWithFrom = false`.
+
 ## CLI example — stdin scoring
 
 `examples/score-stdin.mjs` reads a raw email from stdin, parses its headers,
@@ -331,6 +380,7 @@ This repository is in early development. Implemented so far:
 - Envelope-sender consistency (Return-Path and SPF `smtp.mailfrom` vs From, and the two against each other)
 - DKIM signing-domain consistency (passing `header.d` vs From)
 - DMARC From-domain consistency (trusted, passing `header.from` vs the visible From)
+- Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
 
 The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 

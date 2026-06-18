@@ -1,4 +1,6 @@
 import type { AuthenticationResultsHeader, MessageMetrics, AnalyzeOptions, Rule, Signal } from "../types.js";
+import { collectAuthenticationAlignment } from "../metrics.js";
+import { resolveHeaderTrust } from "./trust.js";
 import { missingAuthResultsRule } from "./missingAuthResults.js";
 import { untrustedAuthservIdRule } from "./untrustedAuthservId.js";
 import { authMethodFailureRule } from "./authMethodFailure.js";
@@ -65,6 +67,14 @@ export function runRules(
 ): Signal[] {
   const signals: Signal[] = [];
 
+  // Recompute the authentication projection with rule-time trust so a caller
+  // using the split API (extractMetrics without trust, then runRules with
+  // trustedAuthservIds) sees trusted passes reflected in metrics.authentication.
+  // Without this, message-scoped rules would read the extraction-time projection
+  // (every header untrusted), disagreeing with analyzeMessage for the same
+  // options and with the per-header projection headerScopedMetrics builds.
+  const messageMetrics = messageScopedMetrics(metrics, options);
+
   for (let i = 0; i < rules.length; ) {
     const rule = rules[i];
     if (rule === undefined) {
@@ -72,7 +82,7 @@ export function runRules(
       continue;
     }
     if (rule.scope !== "header") {
-      signals.push(...rule.evaluate({ metrics, options }));
+      signals.push(...rule.evaluate({ metrics: messageMetrics, options }));
       i += 1;
       continue;
     }
@@ -84,7 +94,7 @@ export function runRules(
     const headerRules = rules.slice(i, end);
 
     for (const header of metrics.authenticationResults) {
-      const headerMetrics = headerScopedMetrics(metrics, header);
+      const headerMetrics = headerScopedMetrics(metrics, header, options);
       for (const rule of headerRules) {
         signals.push(...rule.evaluate({ metrics: headerMetrics, options }));
       }
@@ -97,13 +107,47 @@ export function runRules(
 }
 
 /**
+ * Rebuild the whole-message `authentication` projection with rule-time trust so
+ * message-scoped rules read the same trust analyzeMessage would for the given
+ * options. Trust is resolved through resolveHeaderTrust (mirroring
+ * headerScopedMetrics and the Authentication-Results rules): with no
+ * trustedAuthservIds override this reproduces the extraction-time projection,
+ * and with an override the trusted passes a split-API caller declared at rule
+ * time are reflected, instead of the stale projection baked into
+ * metrics.authentication at extraction.
+ */
+function messageScopedMetrics(metrics: MessageMetrics, options: AnalyzeOptions): MessageMetrics {
+  const authentication = collectAuthenticationAlignment(
+    metrics.authenticationResults,
+    metrics.fromDomain,
+    (h) => resolveHeaderTrust(h, options),
+  );
+  return { ...metrics, authentication };
+}
+
+/**
  * Narrow metrics to a single Authentication-Results header for header-scoped
  * rule evaluation. All other facts are preserved so header-scoped rules can
  * still read message-level metrics (e.g. fromDomain) if they need to.
+ *
+ * The cached `authentication` projection is recomputed from just this header so
+ * a header-scoped rule reading authentication.anyAuthAligned, the per-method
+ * result lists, or the trusted/untrusted counts sees only the current header's
+ * SPF/DKIM/DMARC results — not another header's. Trust is resolved through
+ * resolveHeaderTrust (mirroring the other Authentication-Results rules) so a
+ * caller declaring trustedAuthservIds to runRules after extracting metrics
+ * without it gets the same projection analyzeMessage would, rather than the
+ * extraction-time trust baked into metrics.authentication.
  */
 function headerScopedMetrics(
   metrics: MessageMetrics,
   header: AuthenticationResultsHeader,
+  options: AnalyzeOptions,
 ): MessageMetrics {
-  return { ...metrics, authenticationResults: [header] };
+  const authentication = collectAuthenticationAlignment(
+    [header],
+    metrics.fromDomain,
+    (h) => resolveHeaderTrust(h, options),
+  );
+  return { ...metrics, authentication, authenticationResults: [header] };
 }

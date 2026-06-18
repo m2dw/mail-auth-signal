@@ -82,6 +82,7 @@ const METRIC_KEYS: readonly string[] = [
   "dkimDomainMatchesFromDomain",
   "dmarcHeaderFromDomains",
   "dmarcHeaderFromMatchesFromDomain",
+  "authentication",
   "authenticationResults",
 ];
 
