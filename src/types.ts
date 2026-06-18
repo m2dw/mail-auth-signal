@@ -229,6 +229,72 @@ export type LexicalStats = {
 };
 
 /**
+ * Richer lexical heuristics for a single string token (a local part, a domain
+ * label, a subject word — whatever the caller chooses to measure), ported from
+ * the Thunderbird Auth Results Filter add-on so callers can retire their local
+ * copies. These complement the lightweight LexicalStats: where LexicalStats
+ * reports raw structural counts, these report shape — how random, how
+ * pronounceable, how repetitive a token is.
+ *
+ * Every value is computed from the token alone, with **no bundled word list,
+ * brand dictionary, language corpus, or n-gram table** — only structural facts an
+ * attacker cannot launder away by choosing a benign-looking string. (Bigram /
+ * trigram "naturalness" was a candidate but is deliberately omitted: a meaningful
+ * naturalness score needs a language-frequency dataset, and bundling one would
+ * cross the data/license boundary this package keeps clear. A caller with its own
+ * licensed corpus can layer that on top of these metrics.)
+ *
+ * The core forms no opinion: these are inputs to a caller's own thresholds, never
+ * a verdict. A "high entropy" or "long consonant run" token is suspicious only in
+ * a context the caller supplies. All values are JSON-serializable, and the
+ * floating-point fields are rounded to 4 decimal places so fixtures stay stable
+ * and cross-language comparison is exact.
+ *
+ * Counts and codepoints are measured the same codepoint-based way as LexicalStats
+ * (so a Unicode/IDN token is measured by what a reader sees), while the letter,
+ * vowel, and consonant classifications are intentionally **ASCII-only**: deciding
+ * whether an arbitrary Unicode codepoint is a vowel is locale- and script-
+ * dependent and would need Unicode tables this core does not bundle, so a
+ * non-ASCII codepoint is simply not counted as a letter/vowel/consonant. It still
+ * participates in length, entropy, unique-ratio, and repeated-run, and still sets
+ * LexicalStats.hasNonAscii, so a raw IDN token is never silently ignored.
+ *
+ * - shannonEntropy:        Shannon entropy in bits over the codepoint-frequency
+ *                          distribution. 0 for an empty or single-character token.
+ *                          A higher value means a more uniform, less predictable
+ *                          mix of characters (a weak hint of a random/generated
+ *                          identifier).
+ * - normalizedEntropy:     shannonEntropy divided by the maximum possible entropy
+ *                          for a token of this length (log2(length), reached when
+ *                          every character is distinct), giving a length-
+ *                          independent value in [0, 1]. 0 when length < 2.
+ * - vowelRatio:            ASCII vowels (a, e, i, o, u; case-insensitive) divided
+ *                          by ASCII letters, in [0, 1]. 0 when the token has no
+ *                          ASCII letters. An unusually low ratio is a weak hint of
+ *                          an unpronounceable / machine-generated token.
+ * - maxConsonantRun:       length of the longest run of consecutive ASCII
+ *                          consonants. Long runs are atypical of natural words.
+ * - maxRepeatedCharRun:    length of the longest run of the same codepoint
+ *                          repeated consecutively (e.g. 3 for "aaab"). 0 for an
+ *                          empty token, at least 1 otherwise.
+ * - uniqueCharRatio:       distinct codepoints divided by length, in [0, 1]. 0 for
+ *                          an empty token. A low ratio means heavy character reuse.
+ * - letterDigitTransitions: number of adjacent codepoint pairs that switch between
+ *                          an ASCII letter and an ASCII digit in either direction
+ *                          (e.g. 2 for "ab12ab"). Frequent letter/digit
+ *                          alternation is a common shape of obfuscated tokens.
+ */
+export type LexicalHeuristics = {
+  shannonEntropy: number;
+  normalizedEntropy: number;
+  vowelRatio: number;
+  maxConsonantRun: number;
+  maxRepeatedCharRun: number;
+  uniqueCharRatio: number;
+  letterDigitTransitions: number;
+};
+
+/**
  * Structural decomposition of a domain into its dot-separated labels, plus an
  * optional registrable-domain view.
  *

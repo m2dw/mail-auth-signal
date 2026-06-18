@@ -1,0 +1,70 @@
+{
+  "description": "Hand-computed cases for computeLexicalHeuristics. Every expected value is reasoned from the token alone (no bundled data), so the fixture independently verifies the math rather than echoing the implementation. Floating-point fields are rounded to 4 decimals; counts are integers.",
+  "cases": [
+    {
+      "label": "empty token reports all zeros",
+      "input": "",
+      "expected": {
+        "shannonEntropy": 0,
+        "normalizedEntropy": 0,
+        "vowelRatio": 0,
+        "maxConsonantRun": 0,
+        "maxRepeatedCharRun": 0,
+        "uniqueCharRatio": 0,
+        "letterDigitTransitions": 0
+      }
+    },
+    {
+      "label": "single repeated vowel: zero entropy, full repeated run, no consonants",
+      "input": "aaaa",
+      "expected": {
+        "shannonEntropy": 0,
+        "normalizedEntropy": 0,
+        "vowelRatio": 1,
+        "maxConsonantRun": 0,
+        "maxRepeatedCharRun": 4,
+        "uniqueCharRatio": 0.25,
+        "letterDigitTransitions": 0
+      }
+    },
+    {
+      "label": "all-distinct consonants: max-length normalized entropy, full consonant run, zero vowels",
+      "input": "xyz",
+      "expected": {
+        "shannonEntropy": 1.585,
+        "normalizedEntropy": 1,
+        "vowelRatio": 0,
+        "maxConsonantRun": 3,
+        "maxRepeatedCharRun": 1,
+        "uniqueCharRatio": 1,
+        "letterDigitTransitions": 0
+      }
+    },
+    {
+      "label": "letters and digits alternating: two letter/digit transitions, repeated character classes",
+      "input": "ab12ab",
+      "expected": {
+        "shannonEntropy": 1.9183,
+        "normalizedEntropy": 0.7421,
+        "vowelRatio": 0.5,
+        "maxConsonantRun": 1,
+        "maxRepeatedCharRun": 1,
+        "uniqueCharRatio": 0.6667,
+        "letterDigitTransitions": 2
+      }
+    },
+    {
+      "label": "non-ASCII codepoint counts toward length/entropy but is not a letter or vowel",
+      "input": "café",
+      "expected": {
+        "shannonEntropy": 2,
+        "normalizedEntropy": 1,
+        "vowelRatio": 0.3333,
+        "maxConsonantRun": 1,
+        "maxRepeatedCharRun": 1,
+        "uniqueCharRatio": 1,
+        "letterDigitTransitions": 0
+      }
+    }
+  ]
+}

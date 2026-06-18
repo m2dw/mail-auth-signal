@@ -2,6 +2,7 @@ export { analyzeMessage } from "./analyze.js";
 export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
 export {
   computeDomainParts,
+  computeLexicalHeuristics,
   computeLexicalStats,
   computeSenderIdentity,
 } from "./senderIdentity.js";
@@ -54,6 +55,7 @@ export type {
   DomainParts,
   HeaderInput,
   HeaderLine,
+  LexicalHeuristics,
   LexicalStats,
   MessageMetrics,
   MetricsDependencies,

@@ -2,6 +2,7 @@ import { allDomainsMatch, extractEmbeddedDomains, parseFromMailbox } from "./dom
 import type {
   DisplayNameMetrics,
   DomainParts,
+  LexicalHeuristics,
   LexicalStats,
   MetricsDependencies,
   SenderIdentityMetrics,
@@ -24,6 +25,108 @@ export function computeLexicalStats(value: string): LexicalStats {
     if ((char.codePointAt(0) ?? 0) > 0x7f) hasNonAscii = true;
   }
   return { length, digitCount, hyphenCount, hasNonAscii };
+}
+
+/**
+ * Round a floating-point metric to 4 decimal places so heuristics serialize to a
+ * stable, cross-language-comparable value (avoiding 0.30000000000000004 drift in
+ * fixtures). Integer-valued metrics never pass through here.
+ */
+function round4(value: number): number {
+  return Math.round(value * 1e4) / 1e4;
+}
+
+const ASCII_VOWELS = new Set(["a", "e", "i", "o", "u"]);
+
+function isAsciiLetter(char: string): boolean {
+  return (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
+}
+
+/**
+ * Compute the richer, data-free lexical heuristics for a token (see
+ * LexicalHeuristics). Like computeLexicalStats it consults no external word list,
+ * dictionary, language corpus, or n-gram table — only the token itself. Counts
+ * and codepoints are codepoint-based; letter/vowel/consonant classification is
+ * ASCII-only (a non-ASCII codepoint still counts toward length, entropy, the
+ * unique ratio, and repeated runs, but is not treated as a letter).
+ */
+export function computeLexicalHeuristics(value: string): LexicalHeuristics {
+  const chars = [...value];
+  const length = chars.length;
+  if (length === 0) {
+    return {
+      shannonEntropy: 0,
+      normalizedEntropy: 0,
+      vowelRatio: 0,
+      maxConsonantRun: 0,
+      maxRepeatedCharRun: 0,
+      uniqueCharRatio: 0,
+      letterDigitTransitions: 0,
+    };
+  }
+
+  const frequencies = new Map<string, number>();
+  let letterCount = 0;
+  let vowelCount = 0;
+  let consonantRun = 0;
+  let maxConsonantRun = 0;
+  let repeatedRun = 1;
+  let maxRepeatedCharRun = 1;
+  let letterDigitTransitions = 0;
+
+  for (let index = 0; index < length; index++) {
+    const char = chars[index] as string;
+    frequencies.set(char, (frequencies.get(char) ?? 0) + 1);
+
+    const letter = isAsciiLetter(char);
+    const digit = char >= "0" && char <= "9";
+    if (letter) {
+      letterCount++;
+      if (ASCII_VOWELS.has(char.toLowerCase())) {
+        vowelCount++;
+        consonantRun = 0;
+      } else {
+        consonantRun++;
+        if (consonantRun > maxConsonantRun) maxConsonantRun = consonantRun;
+      }
+    } else {
+      consonantRun = 0;
+    }
+
+    if (index > 0) {
+      const prev = chars[index - 1] as string;
+      if (char === prev) {
+        repeatedRun++;
+        if (repeatedRun > maxRepeatedCharRun) maxRepeatedCharRun = repeatedRun;
+      } else {
+        repeatedRun = 1;
+      }
+      const prevLetter = isAsciiLetter(prev);
+      const prevDigit = prev >= "0" && prev <= "9";
+      if ((prevLetter && digit) || (prevDigit && letter)) letterDigitTransitions++;
+    }
+  }
+
+  let shannonEntropy = 0;
+  for (const count of frequencies.values()) {
+    const probability = count / length;
+    shannonEntropy -= probability * Math.log2(probability);
+  }
+
+  // Max possible entropy for a token of this length is log2(length), reached when
+  // every codepoint is distinct; dividing by it yields a length-independent [0, 1]
+  // value. Length 1 has zero spread (log2(1) === 0), so report 0 rather than 0/0.
+  const normalizedEntropy = length > 1 ? shannonEntropy / Math.log2(length) : 0;
+
+  return {
+    shannonEntropy: round4(shannonEntropy),
+    normalizedEntropy: round4(normalizedEntropy),
+    vowelRatio: letterCount > 0 ? round4(vowelCount / letterCount) : 0,
+    maxConsonantRun,
+    maxRepeatedCharRun,
+    uniqueCharRatio: round4(frequencies.size / length),
+    letterDigitTransitions,
+  };
 }
 
 /**
