@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.0 — 2026-06-18
+
 - Ported the Layer 4 composite rule framework as reusable signal rules (issue #35):
   - Added a composite-rule framework alongside the per-metric base rules: the
     `CompositeRule` / `CompositeRuleContext` types and `runCompositeRules`. A
