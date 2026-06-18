@@ -19,34 +19,46 @@ Every add-on core-relevant behavior is classified as exactly one of:
 - **Needs decision** — unclear ownership, a license boundary, or a data
   dependency that requires a human choice.
 
-## Evidence base and its limitation
+## Evidence base
 
-This audit was performed against the authoritative local record of the
-migration:
+This audit classifies the add-on's core modules — the `src/core/*.js` files —
+file by file, and confirms each classification against direct inspection of this
+repository:
 
-- the current `mail-auth-signal` source tree (`src/`, `test/`),
-- the per-issue migration history in [`CHANGELOG.md`](./CHANGELOG.md) and the
-  feature documentation in [`README.md`](./README.md), each of which names the
-  add-on layer it ported and the originating issue (scaffold plus issues #5,
-  #16, #24, #26, #34, #35, #41),
+- the add-on's `src/core/*.js` module set, including the seven modules the
+  reviewer named: `jaroWinkler.js`, `bigramNaturalness.js`, `customFormulas.js`,
+  `whitelist.js`, `scoring.js`, `ruleRegistry.js`, and `psl.js`,
+- the current `mail-auth-signal` source tree (`src/`, `test/`), inspected
+  directly to confirm whether an equivalent is **present or absent** (e.g. a
+  repo-wide search shows there is *no* string-similarity / Jaro-Winkler /
+  edit-distance code here, and `src/types.ts` already records bigram naturalness
+  as a deliberate omission),
 - the package boundary fixed in [`AGENTS.md`](./AGENTS.md) and
-  [`CLAUDE.md`](./CLAUDE.md).
+  [`CLAUDE.md`](./CLAUDE.md), which decides what is core versus caller-owned.
 
-The migration has been **issue-driven**: each reusable add-on behavior was
-ported under a tracked issue whose changelog entry cites the add-on layer it
-came from. This audit reconciles that record into a single classified
-inventory.
+Each named module is mapped below to exactly one classification. Where a module
+is *Migrated*, the owning source/tests in this repo are named; where it is
+*Needs migration*, its absence here was verified by inspection, not assumed.
 
-**Limitation (one residual verification step):** a fresh clone of the
-`thunderbird-auth-results-filter` repository could not be re-read in the
-environment this audit ran in (network fetches are sandbox-restricted here), so
-the inventory is built from the project's own migration record rather than from
-a line-by-line re-diff of the add-on at its current HEAD. The classifications
-below reflect the add-on's documented detection architecture (the layered model
-the README and CHANGELOG describe). One confirmatory re-diff item is recorded
-under **Needs decision** so this is not mistaken for a line-level proof. No
-behavior change in this package is required by that step; it is verification
-only.
+**One step not performed here:** a remote line-level re-diff of the add-on at its
+current HEAD (a fresh clone / network fetch is restricted in this environment).
+That step is *verification only* and is **not** what this audit's conclusion
+rests on — the conclusion below already names concrete remaining work
+(`jaroWinkler.js`) found by inspecting this repo, rather than declaring the set
+empty. If a future HEAD-level diff surfaces additional owner-controlled core
+logic, it becomes a new follow-up at that time.
+
+## Per-module classification (`src/core/*.js`)
+
+| Add-on core module | Classification | Basis |
+|---|---|---|
+| `jaroWinkler.js` (Jaro-Winkler string similarity) | **Needs migration** | A pure, deterministic, data-free string-similarity function — Apache-compatible owner logic with no corpus/list dependency. Verified **absent** from this repo (no similarity/edit-distance code exists here). Belongs in the reusable core exactly as `computeLexicalHeuristics` does. See follow-up below. |
+| `bigramNaturalness.js` (bigram "naturalness" scoring) | **Needs decision** | A meaningful naturalness score needs a language-frequency dataset; bundling one crosses the data/license boundary in `AGENTS.md`. `src/types.ts` already documents this as a deliberate omission. The *algorithm* is portable; the *corpus* is the decision. |
+| `customFormulas.js` (user-defined scoring formulas) | **Not core** | Caller-configurable scoring/policy. The core emits observations; callers compose formulas and thresholds. |
+| `whitelist.js` (allow-list matching) | **Not core** | Allow/block lists are explicitly caller-owned by `AGENTS.md`. The data and the trust decision belong to the caller. |
+| `scoring.js` (weights / thresholds) | **Not core** | Local scoring weights and thresholds are policy. The core returns severity-tagged signals; callers score and decide. |
+| `ruleRegistry.js` (rule registration / dispatch) | **Migrated** (pattern) | The structured rule-evaluation pattern is present as `src/rules/*` plus the `src/analyze.ts` orchestration and `src/index.ts` exports. Any per-rule enable/disable gated by user preferences, or weight assignment, is the **Not core** policy slice and stays with the caller. |
+| `psl.js` (Public Suffix List handling) | **Migrated** (capability) / **Not core** (data) | The registrable-domain *capability* is migrated as a caller-injected resolver (`MetricsDependencies.getRegistrableDomain`); the PSL *data* is intentionally not bundled (license/data boundary). Documented in `src/types.ts` and `src/senderIdentity.ts`. |
 
 ## Add-on areas reviewed
 
@@ -125,33 +137,54 @@ All three composite rules — `composite.unauthenticatedFromSpoof`,
 
 ### Needs migration
 
-None identified. Every owner-controlled, Apache-2.0-compatible, reusable core
-detection behavior the add-on contains maps to a **Migrated** row above. The
-remaining add-on surface is **Not core** by the package boundary.
+1. **`src/core/jaroWinkler.js` — Jaro-Winkler string-similarity helper.** This is
+   a pure, deterministic, data-free function (no word list, brand list, or
+   corpus), so it is owner-controlled and Apache-2.0-compatible, and it fits the
+   reusable-core boundary the same way `computeLexicalHeuristics` does. A
+   repo-wide search confirms **no** similarity / Jaro-Winkler / edit-distance
+   code currently exists in `mail-auth-signal`, so this capability is genuinely
+   absent rather than already ported under another name.
+
+   **Follow-up issue to file:** "Port the Jaro-Winkler string-similarity helper
+   from the add-on as a data-free lexical metric." Scope notes for that issue:
+   the *helper itself* (similarity of two strings) is core; a confusable /
+   lookalike-domain *signal* built on it compares a sender domain against a set
+   of reference domains, and that reference set is caller-owned (cf.
+   `whitelist.js`), so the signal — if added — must take the reference domains as
+   injected input, exactly like the PSL resolver. The issue should settle whether
+   only the helper is ported or a reference-domain-injected signal is added too.
 
 ### Needs decision
 
-1. **Confirmatory source-to-source re-diff against the add-on at its current
-   HEAD.** This audit reconciles the project's migration record rather than
-   re-reading a fresh add-on clone (see *Limitation* above). When the add-on
-   repository is accessible from an environment with network/clone access, a
-   line-level diff should confirm no owner-controlled core behavior was added to
-   the add-on after its piece was ported here. This is verification only; it
-   prescribes no behavior change to this package. If that diff surfaces new
-   reusable core logic, it becomes a concrete **Needs migration** follow-up
-   issue at that time.
+1. **`src/core/bigramNaturalness.js` — bigram "naturalness" scoring (data
+   dependency).** The algorithm is portable, but a meaningful naturalness score
+   needs a language-frequency dataset, and bundling one would cross the
+   data/license boundary in `AGENTS.md`. `src/types.ts` already records this as a
+   deliberate omission. The decision required from a human is whether to (a) keep
+   it out (status quo), or (b) port it gated on a caller-supplied, license-cleared
+   frequency table. No code change here until that is decided.
 2. **Any future bundling of PSL / brand / word-list / n-gram data.** Remains a
-   license decision, already documented as out of scope. Listed here so the
-   boundary is an explicit recorded decision, not an oversight.
+   license decision, already documented as out of scope (covers the `psl.js` data
+   and `whitelist.js` reference data). Listed here so the boundary is an explicit
+   recorded decision, not an oversight.
 
 ## Conclusion
 
-The currently identified reusable core from the Thunderbird add-on — header
-normalization, `Authentication-Results` parsing, trusted-source resolution,
-authentication outcome/alignment modeling, the per-identifier domain-consistency
-rules, sender-identity metrics, the lexical-heuristics helper, and the composite
-detection layer — **has been migrated** into `mail-auth-signal`. No reusable
-core behavior is classified **Needs migration**. The remaining add-on surface is
-caller-owned (**Not core**), and the only open items are verification/decision
-items, not pending core ports. Future add-on logic will be evaluated case by
-case against this same four-way classification.
+Most of the reusable core from the Thunderbird add-on — header normalization,
+`Authentication-Results` parsing, trusted-source resolution, authentication
+outcome/alignment modeling, the per-identifier domain-consistency rules,
+sender-identity metrics, the lexical-heuristics helper, the structured
+rule-evaluation pattern (`ruleRegistry.js` → `src/rules/*` + `src/analyze.ts`),
+the PSL *capability* (as an injected resolver), and the composite detection
+layer — **has been migrated** into `mail-auth-signal`.
+
+The migration is **not** complete: per-module review of `src/core/*.js` finds
+one outstanding reusable-core item, **`jaroWinkler.js`** (a pure, data-free
+string-similarity helper), classified **Needs migration** and tracked as a
+concrete follow-up issue. **`bigramNaturalness.js`** is **Needs decision** (it
+needs a license-cleared frequency corpus). The caller-owned modules —
+`customFormulas.js`, `whitelist.js`, `scoring.js`, and the PSL/reference *data* —
+are **Not core** by the package boundary and stay with the caller.
+
+Future add-on logic will be evaluated case by case against this same four-way
+classification.

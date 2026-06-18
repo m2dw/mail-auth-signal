@@ -6,7 +6,7 @@
 
 Mail Auth Signal is a lightweight sender-risk signal engine for email authentication results and header consistency analysis.
 
-It is the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project; the reusable detection logic currently identified in that add-on has been migrated here (see [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md) and [Migration status](#migration-status)). The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
+It is the standalone, Apache-2.0 licensed core extracted from the Thunderbird Auth Results Filter project. A per-module audit of the add-on's `src/core/*.js` files (see [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md) and [Migration status](#migration-status)) finds that most reusable detection logic has been migrated here, with one pure helper — Jaro-Winkler string similarity — still classified *Needs migration*. The library focuses on pure parsing and signal extraction. It does not move messages, show UI, access Thunderbird APIs, perform DNS lookups, or send message data anywhere.
 
 ## Goals
 
@@ -517,13 +517,16 @@ downgraded to `low` severity.
 
 ## Migration status
 
-The reusable detection core currently identified in the Thunderbird Auth Results
-Filter add-on has been migrated into this package. The migration was audited
-source-area by source-area in [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md), which
-classifies every add-on behavior as *Migrated*, *Not core* (caller-owned), *Needs
-migration*, or *Needs decision*. No behavior is classified *Needs migration*: the
-currently identified reusable core migration is complete, and future add-on logic
-will be evaluated case by case against that same classification.
+The Thunderbird Auth Results Filter add-on's core modules (`src/core/*.js`) were
+audited file by file in [`MIGRATION-AUDIT.md`](./MIGRATION-AUDIT.md), which
+classifies each as *Migrated*, *Not core* (caller-owned), *Needs migration*, or
+*Needs decision*. Most reusable core is **migrated** (listed below). The
+migration is **not** complete: one pure, data-free helper —
+**`jaroWinkler.js`** (Jaro-Winkler string similarity) — is classified *Needs
+migration* and tracked as a follow-up issue, and **`bigramNaturalness.js`** is
+*Needs decision* because it needs a license-cleared language-frequency corpus.
+Future add-on logic will be evaluated case by case against that same
+classification.
 
 Migrated core (pure parsing, metrics, signals — no UI, storage, mailbox actions,
 network, or scoring policy):
@@ -544,11 +547,16 @@ network, or scoring policy):
 - Composite (Layer 4) signals combining the base layers (opt-in)
 
 Add-on behavior that is intentionally **not** migrated — UI, notifications,
-mailbox/folder actions, storage, Thunderbird/WebExtension APIs, network/DNS, local
-scoring thresholds, and bundled PSL/brand/word-list data — stays caller-owned by
-the boundary in [`AGENTS.md`](./AGENTS.md). The only open items in the audit are a
-confirmatory re-diff against the add-on and the standing PSL/data license boundary,
-neither of which is a pending core port.
+mailbox/folder actions, storage, Thunderbird/WebExtension APIs, network/DNS, and
+the caller-owned policy modules `customFormulas.js`, `whitelist.js`, `scoring.js`,
+plus bundled PSL/brand/word-list data — stays caller-owned by the boundary in
+[`AGENTS.md`](./AGENTS.md).
+
+Open items in the audit: one **pending core port** — `jaroWinkler.js` (*Needs
+migration*, tracked as a follow-up issue) — and one **license decision** —
+whether to ever bundle the language-frequency corpus that `bigramNaturalness.js`
+would require (*Needs decision*). The standing PSL/reference-data boundary remains
+caller-owned.
 
 ## License
 
