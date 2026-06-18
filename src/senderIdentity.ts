@@ -1,6 +1,9 @@
 import { allDomainsMatch, extractEmbeddedDomains, parseFromMailbox } from "./domains.js";
 import type {
+  DisplayNameDerivedMetrics,
   DisplayNameMetrics,
+  DisplayNameNormalization,
+  DisplayNameSignals,
   DomainParts,
   LexicalHeuristics,
   LexicalStats,
@@ -130,6 +133,61 @@ export function computeLexicalHeuristics(value: string): LexicalHeuristics {
 }
 
 /**
+ * Minimum whitespace-separated tokens, minimum single-letter tokens, and the
+ * single-letter share required before a display name reads as letter-spacing
+ * camouflage. Tuned (see DisplayNameSignals) so a fully or mostly spaced brand
+ * name fires while normal multi-word names and one- or two-initial names do not.
+ */
+const SPACED_CAMOUFLAGE_MIN_TOKENS = 3;
+const SPACED_CAMOUFLAGE_MIN_SINGLE_LETTER_TOKENS = 3;
+const SPACED_CAMOUFLAGE_MIN_SINGLE_LETTER_RATIO = 0.6;
+
+/** A token that is exactly one Unicode letter — the unit a letter-spaced name emits. */
+function isSingleLetterToken(token: string): boolean {
+  return /^\p{L}$/u.test(token);
+}
+
+/**
+ * Derive the whitespace-normalization view of a display name (see
+ * DisplayNameNormalization, DisplayNameDerivedMetrics, DisplayNameSignals).
+ *
+ * Compaction removes every run of intra-name whitespace, collapsing a
+ * letter-spaced brand name into a single matchable token without consulting any
+ * bundled brand list or word list. The camouflage signal is a pure structural
+ * judgement on the whitespace-separated tokens; it never inspects the meaning of
+ * the token, so it cannot be laundered by choosing a benign-looking brand.
+ */
+export function computeDisplayNameWhitespace(text: string | null): {
+  normalized: DisplayNameNormalization;
+  metrics: DisplayNameDerivedMetrics;
+  signals: DisplayNameSignals;
+} {
+  if (text === null) {
+    return {
+      normalized: { compactedWhitespace: null },
+      metrics: { whitespaceCompactedChanged: false },
+      signals: { spacedDisplayNameCamouflageCandidate: false },
+    };
+  }
+
+  const compactedWhitespace = text.replace(/\s+/gu, "");
+  const tokens = text.split(/\s+/u).filter((token) => token.length > 0);
+  const singleLetterTokens = tokens.filter(isSingleLetterToken).length;
+
+  const spacedDisplayNameCamouflageCandidate =
+    tokens.length >= SPACED_CAMOUFLAGE_MIN_TOKENS &&
+    singleLetterTokens >= SPACED_CAMOUFLAGE_MIN_SINGLE_LETTER_TOKENS &&
+    singleLetterTokens / tokens.length >= SPACED_CAMOUFLAGE_MIN_SINGLE_LETTER_RATIO;
+
+  return {
+    normalized: { compactedWhitespace },
+    // Compaction "changed" the token whenever any whitespace was removed.
+    metrics: { whitespaceCompactedChanged: compactedWhitespace !== text },
+    signals: { spacedDisplayNameCamouflageCandidate },
+  };
+}
+
+/**
  * Decompose a normalized domain into its dot-separated labels (see DomainParts).
  * The label fields need no external data; the registrable-domain fields are
  * populated only when a resolver is supplied (the core bundles no PSL data).
@@ -181,6 +239,7 @@ export function computeSenderIdentity(
 
   const displayText = parsed.displayName;
   const embeddedDomains = extractEmbeddedDomains(displayText);
+  const whitespace = computeDisplayNameWhitespace(displayText);
   const displayName: DisplayNameMetrics = {
     present: displayText !== null,
     text: displayText,
@@ -189,6 +248,9 @@ export function computeSenderIdentity(
     containsEmail: embeddedDomains.length > 0,
     embeddedDomains,
     embeddedDomainMatchesFromDomain: allDomainsMatch(fromDomain, embeddedDomains),
+    normalized: whitespace.normalized,
+    metrics: whitespace.metrics,
+    signals: whitespace.signals,
   };
 
   // Pair the local part with the canonical From domain. parseFromMailbox mirrors
