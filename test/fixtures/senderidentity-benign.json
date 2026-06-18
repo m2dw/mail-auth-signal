@@ -1,0 +1,40 @@
+{
+  "description": "Benign sender: a plain display name with no embedded address, a short alphabetic local part, and a Message-ID stamped from the same domain as From. No lexical anomaly (no digits, hyphens, or non-ASCII), and the display name contains no email-like token, so containsEmail is false and embeddedDomainMatchesFromDomain stays null. Registrable-domain fields are null because no PSL resolver is supplied.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<abc123@example.com>"
+    }
+  },
+  "expected": {
+    "displayName": {
+      "present": true,
+      "text": "Example Sender",
+      "length": 14,
+      "hasNonAscii": false,
+      "containsEmail": false,
+      "embeddedDomains": [],
+      "embeddedDomainMatchesFromDomain": null
+    },
+    "localPart": "notice",
+    "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+    "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+    "fromDomainParts": {
+      "domain": "example.com",
+      "labels": ["example", "com"],
+      "labelCount": 2,
+      "topLabel": "com",
+      "registrableDomain": null,
+      "subdomainDepth": null
+    },
+    "messageIdDomainParts": {
+      "domain": "example.com",
+      "labels": ["example", "com"],
+      "labelCount": 2,
+      "topLabel": "com",
+      "registrableDomain": null,
+      "subdomainDepth": null
+    },
+    "messageIdRegistrableDomainMatchesFromDomain": null
+  }
+}

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- Ported sender-identity metrics (issue #34):
+  - Added `MessageMetrics.senderIdentity` (`SenderIdentityMetrics`): a
+    serializable, scoring-free view of the sender's identity shape derived from
+    the `From` mailbox and the `Message-ID` domain. Includes display-name
+    structure (`DisplayNameMetrics`) with address-in-display-name detection
+    (`containsEmail`, `embeddedDomains`, `embeddedDomainMatchesFromDomain` — the
+    `From: "service@brand.com" <attacker@evil.test>` spoof shape), local-part and
+    domain lexical profiles (`LexicalStats`: codepoint `length`, `digitCount`,
+    `hyphenCount`, `hasNonAscii`), and domain label decomposition
+    (`DomainParts`: `labels`, `labelCount`, `topLabel`).
+  - Added an optional registrable-domain comparison
+    (`messageIdRegistrableDomainMatchesFromDomain`, plus `DomainParts.registrableDomain`
+    and `subdomainDepth`). These require a caller-supplied registrable-domain
+    resolver, injected via the new non-serializable `MetricsDependencies`
+    argument to `analyzeMessage(input, rules?, deps?)` / `extractMetrics(input, deps?)`.
+    **No Public Suffix List, brand list, or word list is bundled** (license
+    boundary; see `AGENTS.md` / `NOTICE`); without a resolver the
+    registrable-domain fields stay `null` and the label-based fields are still
+    populated.
+  - Added the `parseFromMailbox` and `extractEmbeddedDomains` domain helpers and
+    the `computeSenderIdentity`, `computeDomainParts`, and `computeLexicalStats`
+    functions to the public API, with the `SenderIdentityMetrics`,
+    `DisplayNameMetrics`, `DomainParts`, `LexicalStats`, and `MetricsDependencies`
+    types.
+  - Metrics stay separate from scoring/rule policy: no new rule or signal is
+    emitted by this change. Added `test/senderIdentity.test.ts` with benign and
+    suspicious fixtures (`senderidentity-benign.json`,
+    `senderidentity-display-name-spoof.json`) and extended every existing metric
+    fixture (and the parity corpus) with the `senderIdentity` field.
+
 - Added a versioned release and npm publishing process (issue #26):
   - Documented the full release flow in `RELEASING.md`: SemVer policy, changelog
     update, version bump, `npm test`, `npm run build`, `npm pack --dry-run`

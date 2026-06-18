@@ -11,6 +11,7 @@ import {
 } from "./domains.js";
 import { getFirstHeaderValue, getHeaderValues, normalizeHeaders } from "./normalizeHeaders.js";
 import { parseAuthenticationResults } from "./parseAuthenticationResults.js";
+import { computeSenderIdentity } from "./senderIdentity.js";
 import type {
   AnalyzeInput,
   AuthenticationAlignment,
@@ -18,6 +19,7 @@ import type {
   DkimResult,
   DmarcResult,
   MessageMetrics,
+  MetricsDependencies,
   SpfResult,
 } from "./types.js";
 
@@ -153,11 +155,12 @@ export function collectAuthenticationAlignment(
  * snapshot the raw facts independently of any signals. The result contains no
  * opinions: it is the input every Rule evaluates against.
  */
-export function extractMetrics(input: AnalyzeInput): MessageMetrics {
+export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies): MessageMetrics {
   const headers = normalizeHeaders(input.headers);
   const trustedAuthservIds = input.options?.trustedAuthservIds ?? [];
 
-  const fromDomain = extractDomainFromMailbox(getFirstHeaderValue(headers, "from"));
+  const fromValue = getFirstHeaderValue(headers, "from");
+  const fromDomain = extractDomainFromMailbox(fromValue);
   const messageIdDomain = extractDomainFromMessageId(getFirstHeaderValue(headers, "message-id"));
   const messageIdDomainMatchesFromDomain = domainsExactlyMatch(fromDomain, messageIdDomain);
 
@@ -244,6 +247,12 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     (header) => header.trusted,
   );
 
+  // Sender-identity metrics (display-name structure, local-part/domain lexical
+  // profiles, label decomposition, optional registrable-domain comparison). Pure
+  // facts derived from the raw From value plus the already-extracted From and
+  // Message-ID domains; the optional resolver is injected via deps (never bundled).
+  const senderIdentity = computeSenderIdentity(fromValue, fromDomain, messageIdDomain, deps);
+
   return {
     fromDomain,
     messageIdDomain,
@@ -261,6 +270,7 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
     dmarcHeaderFromDomains,
     dmarcHeaderFromMatchesFromDomain,
     authentication,
+    senderIdentity,
     authenticationResults,
   };
 }

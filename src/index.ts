@@ -1,5 +1,10 @@
 export { analyzeMessage } from "./analyze.js";
 export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
+export {
+  computeDomainParts,
+  computeLexicalStats,
+  computeSenderIdentity,
+} from "./senderIdentity.js";
 export { normalizeHeaders } from "./normalizeHeaders.js";
 export { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 export {
@@ -8,8 +13,10 @@ export {
   extractDomainFromMailbox,
   extractDomainFromMessageId,
   extractDomainsFromMailboxList,
+  extractEmbeddedDomains,
   extractEnvelopeSenderDomain,
   isNullReversePath,
+  parseFromMailbox,
 } from "./domains.js";
 export {
   defaultRules,
@@ -32,11 +39,16 @@ export type {
   AuthenticationAlignment,
   AuthenticationMethodResult,
   AuthenticationResultsHeader,
+  DisplayNameMetrics,
   DkimResult,
   DmarcResult,
+  DomainParts,
   HeaderInput,
   HeaderLine,
+  LexicalStats,
   MessageMetrics,
+  MetricsDependencies,
+  SenderIdentityMetrics,
   SpfResult,
   Rule,
   RuleContext,
