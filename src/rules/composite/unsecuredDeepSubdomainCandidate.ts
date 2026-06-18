@@ -43,10 +43,14 @@ import type { CompositeRule, Signal } from "../../types.js";
  * False-positive mitigation (no aligned authentication): a From domain backed by
  * a trusted, passing SPF or DKIM identifier is authenticated as that domain by
  * DMARC's own logic, even when the organizational domain publishes no DMARC
- * record (so the verifier still says `dmarc=none`). This is checked two ways,
- * mirroring DMARC's two alignment modes: `anyAuthAligned === false` rules out an
- * *exact*-match aligned pass, and a same-organization check additionally rules
- * out *relaxed* alignment — a parent-domain identifier such as `dkim=pass
+ * record (so the verifier still says `dmarc=none`). This is checked three ways:
+ * `anyAuthAligned === false` rules out an *exact*-match aligned SPF/DKIM pass; a
+ * trusted `dmarc=pass header.from=<visible From>` is also treated as
+ * authentication, since DMARC passes only when an aligned identifier satisfied
+ * the From's policy and an aggregate verdict may omit the SPF/DKIM method rows
+ * anyAuthAligned is computed from (the other composites count this DMARC-only
+ * pass the same way); and a same-organization check additionally rules out
+ * *relaxed* alignment — a parent-domain identifier such as `dkim=pass
  * header.d=example.com` on a From of `bounce.mail.example.com`. Because this rule
  * already depends on the PSL-derived registrable domain, suppressing same-org
  * SPF/DKIM passes avoids false positives for legitimate parent-domain signing.
@@ -117,6 +121,25 @@ export const unsecuredDeepSubdomainCandidateRule: CompositeRule = {
     // domain they do not control cannot satisfy this, so the guard is not
     // attacker-triggerable.
     if (authentication.anyAuthAligned !== false) return [];
+
+    // A trusted verifier's DMARC pass for the *visible* From domain authenticates
+    // that From even when the same header omits the SPF/DKIM method lines
+    // anyAuthAligned is computed from (a bare `dmarc=pass header.from=From`
+    // aggregate leaves anyAuthAligned vacuously false). DMARC passes only when an
+    // aligned SPF or DKIM identifier satisfied the From domain's policy, so this is
+    // authenticated mail, not an unsecured deep subdomain — mirroring how the other
+    // composites count this DMARC-only pass as authenticating the From. Only a pass
+    // whose header.from equals the visible From counts: a trusted pass for a
+    // different header.from is the dmarc.headerFromMismatch spoof tell, and an
+    // untrusted pass is forge-able.
+    const hasAlignedTrustedDmarcPass = authentication.dmarcResults.some(
+      (result) =>
+        result.trusted &&
+        result.result === "pass" &&
+        result.headerFrom !== null &&
+        result.headerFrom === fromDomain,
+    );
+    if (hasAlignedTrustedDmarcPass) return [];
 
     // anyAuthAligned is exact-match only, but DMARC's relaxed alignment treats a
     // parent-domain identifier as aligned: a deep-subdomain From like

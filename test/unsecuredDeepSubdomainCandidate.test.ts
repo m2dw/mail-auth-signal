@@ -139,6 +139,29 @@ describe("composite.unsecuredDeepSubdomainCandidate", () => {
     expect(candidate(result.signals)).toBeUndefined();
   });
 
+  it("does not flag when a trusted aggregate DMARC pass authenticates the visible From", () => {
+    // Aggregate-only reporting: a trusted verifier emits `dmarc=pass
+    // header.from=<visible From>` with no SPF/DKIM method rows (so anyAuthAligned
+    // stays vacuously false), alongside a trusted `dmarc=none` for the same org.
+    // DMARC only passes when an aligned SPF/DKIM identifier satisfied the From's
+    // policy, so this is authenticated mail and must not be flagged — matching how
+    // the other composites count this DMARC-only pass as authenticating the From.
+    const result = analyze({
+      headers: {
+        from: "Support <alerts@sivakeso.support.sn5799.com>",
+        "authentication-results": [
+          `${TRUSTED_ID}; dmarc=pass header.from=sivakeso.support.sn5799.com`,
+          `${TRUSTED_ID}; dmarc=none header.from=sn5799.com`,
+        ],
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.senderIdentity.fromDomainParts?.subdomainDepth).toBe(2);
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(result.metrics.authentication.dmarcPass).toBe(true);
+    expect(candidate(result.signals)).toBeUndefined();
+  });
+
   it("does not flag a deep subdomain backed by org-domain (relaxed) aligned DKIM", () => {
     // Parent-domain signing: From `bounce.mail.example.com` signed with
     // `header.d=example.com`. anyAuthAligned is exact-match only, so it is false
