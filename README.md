@@ -432,6 +432,53 @@ exact-match consistency metrics: a caller with PSL data can treat an ESP subdoma
 (`mailer.example.com` vs `example.com`) as same-organization, where the exact
 `messageIdDomainMatchesFromDomain` reads as a mismatch.
 
+## Lexical heuristics
+
+`computeLexicalHeuristics(token)` (`LexicalHeuristics`) is a richer companion to
+the lightweight `localPartLexical` / `fromDomainLexical` counts. Where those
+report raw structure (`length`, `digitCount`, …), these report *shape* — how
+random, pronounceable, or repetitive a token is — ported from the Thunderbird
+Auth Results Filter add-on so a downstream add-on can retire its local copy. It is
+an exported helper a caller applies to whatever token it wants to measure (a local
+part, a domain label, a subject word); it is **not** baked into
+`analyzeMessage`'s output, keeping the heuristic and its thresholds in the
+caller's hands.
+
+```ts
+import { computeLexicalHeuristics } from "mail-auth-signal";
+
+computeLexicalHeuristics("x9z8q2w1");
+// { shannonEntropy, normalizedEntropy, vowelRatio, maxConsonantRun,
+//   maxRepeatedCharRun, uniqueCharRatio, letterDigitTransitions }
+```
+
+| Field | Meaning |
+|---|---|
+| `shannonEntropy` | Shannon entropy in bits over the codepoint-frequency distribution. `0` for an empty or single-character token. Higher = a more uniform, less predictable character mix. |
+| `normalizedEntropy` | `shannonEntropy` divided by the maximum for this length (`log2(length)`), giving a length-independent `[0, 1]` value. `0` when `length < 2`. |
+| `vowelRatio` | ASCII vowels ÷ ASCII letters, `[0, 1]`. `0` when there are no ASCII letters. |
+| `maxConsonantRun` | Longest run of consecutive ASCII consonants. |
+| `maxRepeatedCharRun` | Longest run of the same codepoint repeated (`3` for `"aaab"`). `0` when empty, else ≥ 1. |
+| `uniqueCharRatio` | Distinct codepoints ÷ length, `[0, 1]`. `0` when empty. |
+| `letterDigitTransitions` | Adjacent pairs that switch between an ASCII letter and an ASCII digit, either direction (`2` for `"ab12ab"`). |
+
+**Use and limitations.** These are weak, policy-neutral hints, not verdicts — a
+high-entropy or vowel-poor token is only suspicious in a context the caller
+supplies (legitimate DKIM selectors, hashes, and ESP subdomains all look
+"random"). Counts and codepoints are codepoint-based, but letter/vowel/consonant
+classification is **ASCII-only**: a non-ASCII codepoint still counts toward
+length, entropy, the unique ratio, and repeated runs, but is not treated as a
+letter (deciding vowel-ness across scripts needs Unicode tables this core does not
+bundle). Floating-point fields are rounded to 4 decimals so fixtures and
+cross-language ports compare exactly.
+
+**No bundled data.** Every value is computed from the token alone — no word list,
+brand dictionary, language corpus, or n-gram table. Bigram/trigram "naturalness"
+was considered and **deliberately omitted**: a meaningful naturalness score needs
+a language-frequency dataset, and bundling one would cross the data/license
+boundary this package keeps clear (see `AGENTS.md` / `NOTICE`). A caller with its
+own licensed corpus can layer that on top of these metrics.
+
 ## CLI example — stdin scoring
 
 `examples/score-stdin.mjs` reads a raw email from stdin, parses its headers,
@@ -483,6 +530,7 @@ This repository is in early development. Implemented so far:
 - DMARC From-domain consistency (trusted, passing `header.from` vs the visible From)
 - Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
 - Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and an optional registrable-domain comparison via a caller-supplied PSL resolver (no list bundled)
+- Richer lexical heuristics helper (`computeLexicalHeuristics`): entropy, normalized entropy, vowel ratio, max consonant/repeated runs, unique-character ratio, and letter/digit transitions — data-free and policy-neutral
 
 The remaining rules from the Thunderbird add-on will be migrated incrementally after API boundaries and fixtures are stable.
 
