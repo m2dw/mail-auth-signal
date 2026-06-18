@@ -234,7 +234,10 @@ export function extractMetrics(input: AnalyzeInput): MessageMetrics {
   // Consolidated authentication + alignment view (Layer 1 raw results, Layer 2
   // alignment/summary). Uses the baked header.trusted flag — the trust resolved
   // when these metrics were extracted — to stay consistent with the dmarc and
-  // dkim domain sets above and keep analyzeMessage's snapshot stable.
+  // dkim domain sets above and keep analyzeMessage's snapshot stable. runRules
+  // recomputes this projection with rule-time trust (see messageScopedMetrics)
+  // so a caller declaring trustedAuthservIds to runRules after extracting
+  // metrics without it gets a projection consistent with analyzeMessage.
   const authentication = collectAuthenticationAlignment(
     authenticationResults,
     fromDomain,

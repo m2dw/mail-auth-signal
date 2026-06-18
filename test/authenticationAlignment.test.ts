@@ -290,6 +290,61 @@ describe("authentication metrics — header-scoped rules see a per-header projec
   });
 });
 
+describe("authentication metrics — message-scoped rules see a rule-time-trust projection", () => {
+  // A message-scoped rule reading metrics.authentication must see trust resolved
+  // from the options passed to runRules, not the trust baked in at extraction —
+  // otherwise the split API disagrees with analyzeMessage for the same options.
+  const SINGLE_TRUSTED: AnalyzeInput = {
+    headers: {
+      from: FROM,
+      "authentication-results": `${TRUSTED_ID}; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com`,
+    },
+    options: { trustedAuthservIds: [TRUSTED_ID] },
+  };
+
+  /** A message-scoped rule that records the authentication projection it observes. */
+  function captureRule(sink: AuthenticationAlignment[]): Rule {
+    return {
+      key: "test.captureMessageAuthentication",
+      evaluate({ metrics }) {
+        sink.push(metrics.authentication);
+        return [];
+      },
+    };
+  }
+
+  it("recovers trust from trustedAuthservIds declared to runRules after extraction", () => {
+    // Extract without trust (every header untrusted), then declare it to runRules:
+    // the message-scoped projection must recompute as trusted/aligned.
+    const seen: AuthenticationAlignment[] = [];
+    const metricsNoTrust = extractMetrics({ headers: SINGLE_TRUSTED.headers });
+    expect(metricsNoTrust.authentication.anyAuthAligned).toBe(false);
+    expect(metricsNoTrust.authentication.trustedHeaderCount).toBe(0);
+
+    runRules(metricsNoTrust, { trustedAuthservIds: [TRUSTED_ID] }, [captureRule(seen)]);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.anyAuthAligned).toBe(true);
+    expect(seen[0]?.trustedHeaderCount).toBe(1);
+    expect(seen[0]?.untrustedHeaderCount).toBe(0);
+    // The projection a message-scoped rule sees matches analyzeMessage's for the
+    // same options, the consistency the split API promises.
+    const viaAnalyze = analyzeMessage(SINGLE_TRUSTED).metrics.authentication;
+    expect(seen[0]).toEqual(viaAnalyze);
+  });
+
+  it("reproduces the extraction-time projection when runRules gets no trust override", () => {
+    // Without an override, resolveHeaderTrust falls back to the baked flag, so the
+    // recomputed projection is unchanged from extraction.
+    const seen: AuthenticationAlignment[] = [];
+    const metrics = extractMetrics(SINGLE_TRUSTED);
+    runRules(metrics, undefined, [captureRule(seen)]);
+
+    expect(seen[0]).toEqual(metrics.authentication);
+    expect(seen[0]?.anyAuthAligned).toBe(true);
+  });
+});
+
 describe("authentication metrics — analyzeMessage surfaces the block alongside signals", () => {
   it("attaches authentication to metrics without changing the signal set", () => {
     const result = analyzeMessage(

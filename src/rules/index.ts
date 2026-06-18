@@ -67,6 +67,14 @@ export function runRules(
 ): Signal[] {
   const signals: Signal[] = [];
 
+  // Recompute the authentication projection with rule-time trust so a caller
+  // using the split API (extractMetrics without trust, then runRules with
+  // trustedAuthservIds) sees trusted passes reflected in metrics.authentication.
+  // Without this, message-scoped rules would read the extraction-time projection
+  // (every header untrusted), disagreeing with analyzeMessage for the same
+  // options and with the per-header projection headerScopedMetrics builds.
+  const messageMetrics = messageScopedMetrics(metrics, options);
+
   for (let i = 0; i < rules.length; ) {
     const rule = rules[i];
     if (rule === undefined) {
@@ -74,7 +82,7 @@ export function runRules(
       continue;
     }
     if (rule.scope !== "header") {
-      signals.push(...rule.evaluate({ metrics, options }));
+      signals.push(...rule.evaluate({ metrics: messageMetrics, options }));
       i += 1;
       continue;
     }
@@ -96,6 +104,25 @@ export function runRules(
   }
 
   return signals;
+}
+
+/**
+ * Rebuild the whole-message `authentication` projection with rule-time trust so
+ * message-scoped rules read the same trust analyzeMessage would for the given
+ * options. Trust is resolved through resolveHeaderTrust (mirroring
+ * headerScopedMetrics and the Authentication-Results rules): with no
+ * trustedAuthservIds override this reproduces the extraction-time projection,
+ * and with an override the trusted passes a split-API caller declared at rule
+ * time are reflected, instead of the stale projection baked into
+ * metrics.authentication at extraction.
+ */
+function messageScopedMetrics(metrics: MessageMetrics, options: AnalyzeOptions): MessageMetrics {
+  const authentication = collectAuthenticationAlignment(
+    metrics.authenticationResults,
+    metrics.fromDomain,
+    (h) => resolveHeaderTrust(h, options),
+  );
+  return { ...metrics, authentication };
 }
 
 /**
