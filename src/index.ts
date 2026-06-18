@@ -1,6 +1,7 @@
 export { analyzeMessage } from "./analyze.js";
 export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
 export {
+  computeDisplayNameWhitespace,
   computeDomainParts,
   computeLexicalHeuristics,
   computeLexicalStats,
@@ -54,7 +55,10 @@ export type {
   CompositeRuleContext,
   AuthenticationMethodResult,
   AuthenticationResultsHeader,
+  DisplayNameDerivedMetrics,
   DisplayNameMetrics,
+  DisplayNameNormalization,
+  DisplayNameSignals,
   DkimResult,
   DmarcResult,
   DomainParts,

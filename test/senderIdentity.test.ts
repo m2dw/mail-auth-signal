@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeMessage,
+  computeDisplayNameWhitespace,
   computeDomainParts,
   computeLexicalStats,
   computeSenderIdentity,
@@ -233,6 +234,76 @@ describe("senderIdentity — registrable-domain comparison requires a resolver",
   it("reports false when the registrable domains genuinely differ", () => {
     const result = analyzeMessage(message("<x@evil.test>"), undefined, deps);
     expect(result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain).toBe(false);
+  });
+});
+
+describe("displayName — whitespace-compacted brand-style normalization", () => {
+  it("compacts a letter-spaced brand name into a useful matchable token", () => {
+    const si = extractMetrics({
+      headers: { from: "D d a i i c h i L i f e I n s u r a n c e <noreply@evil.test>" },
+    }).senderIdentity;
+    // The raw display name is preserved verbatim for consumers …
+    expect(si.displayName.text).toBe("D d a i i c h i L i f e I n s u r a n c e");
+    // … alongside a compacted token a brand-list match can actually hit.
+    expect(si.displayName.normalized.compactedWhitespace).toBe("DdaiichiLifeInsurance");
+    expect(si.displayName.metrics.whitespaceCompactedChanged).toBe(true);
+    expect(si.displayName.signals.spacedDisplayNameCamouflageCandidate).toBe(true);
+  });
+
+  it("does not flag a normal multi-word human name as spacing camouflage", () => {
+    const si = extractMetrics({
+      headers: { from: "Daiichi Life Insurance <support@example.com>" },
+    }).senderIdentity;
+    expect(si.displayName.text).toBe("Daiichi Life Insurance");
+    // Compaction still happens (it is a plain metric) …
+    expect(si.displayName.normalized.compactedWhitespace).toBe("DaiichiLifeInsurance");
+    expect(si.displayName.metrics.whitespaceCompactedChanged).toBe(true);
+    // … but the compacted token is never treated as an address, and the
+    // camouflage signal stays false for an ordinary multi-word name.
+    expect(si.displayName.containsEmail).toBe(false);
+    expect(si.displayName.embeddedDomains).toEqual([]);
+    expect(si.displayName.signals.spacedDisplayNameCamouflageCandidate).toBe(false);
+  });
+
+  it("leaves a single-word display name unchanged and unflagged", () => {
+    const result = computeDisplayNameWhitespace("Daiichi");
+    expect(result).toEqual({
+      normalized: { compactedWhitespace: "Daiichi" },
+      metrics: { whitespaceCompactedChanged: false },
+      signals: { spacedDisplayNameCamouflageCandidate: false },
+    });
+  });
+
+  it("does not flag a name carrying one or two initials as camouflage", () => {
+    // "John A Smith" (one initial) and "J P Morgan" (two initials) are common
+    // human/brand shapes; neither crosses the single-letter-majority threshold.
+    expect(
+      computeDisplayNameWhitespace("John A Smith").signals.spacedDisplayNameCamouflageCandidate,
+    ).toBe(false);
+    expect(
+      computeDisplayNameWhitespace("J P Morgan").signals.spacedDisplayNameCamouflageCandidate,
+    ).toBe(false);
+  });
+
+  it("flags a partially letter-spaced brand (majority single letters)", () => {
+    const result = computeDisplayNameWhitespace("D d a i i c h i Life Insurance");
+    expect(result.normalized.compactedWhitespace).toBe("DdaiichiLifeInsurance");
+    expect(result.signals.spacedDisplayNameCamouflageCandidate).toBe(true);
+  });
+
+  it("reports nulls/false for an absent display name", () => {
+    expect(computeDisplayNameWhitespace(null)).toEqual({
+      normalized: { compactedWhitespace: null },
+      metrics: { whitespaceCompactedChanged: false },
+      signals: { spacedDisplayNameCamouflageCandidate: false },
+    });
+  });
+
+  it("does not count single non-letter tokens (e.g. ampersand) toward camouflage", () => {
+    // "A & B Corp" has single-char tokens but only two are letters, so the
+    // single-letter count stays below the threshold and it is not flagged.
+    const result = computeDisplayNameWhitespace("A & B Corp");
+    expect(result.signals.spacedDisplayNameCamouflageCandidate).toBe(false);
   });
 });
 

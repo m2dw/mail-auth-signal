@@ -29,6 +29,22 @@
     honest mail via a forge-able header. Scoring/policy stays with the caller.
   - Added focused tests and README documentation; updated the existing
     sender-identity fixtures for the two new (additive) metric fields.
+- Added whitespace-compacted display-name metrics for brand-style matching (issue #46):
+  - Extended `DisplayNameMetrics` with `normalized.compactedWhitespace` (the
+    display name with all intra-name whitespace removed), `metrics.whitespaceCompactedChanged`
+    (whether compaction changed the effective token), and
+    `signals.spacedDisplayNameCamouflageCandidate` (a letter-spacing brand-camouflage
+    hint), so consumers can detect spaced brand-style names — e.g.
+    `D d a i i c h i L i f e I n s u r a n c e` — without re-implementing the
+    normalization. Added the `DisplayNameNormalization`, `DisplayNameDerivedMetrics`,
+    and `DisplayNameSignals` types and exported the pure `computeDisplayNameWhitespace`
+    helper.
+  - The camouflage candidate fires only when single Unicode letters dominate the
+    whitespace-separated tokens (≥ 3 tokens, ≥ 3 single letters, single-letter
+    majority), so normal multi-word names and one/two-initial names stay unflagged.
+    The compacted form is a lexical token only — never parsed or used as an email
+    address — and no brand list, word list, or other licensed data is bundled. The
+    raw display name remains available, and the library assigns no score.
 - Audited Thunderbird add-on core-logic migration completeness (issue #45):
   - Added `MIGRATION-AUDIT.md`, an explicit source-area inventory classifying
     every add-on core-relevant behavior as *Migrated* (with owning source/tests

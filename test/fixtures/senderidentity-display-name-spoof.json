@@ -14,7 +14,10 @@
       "hasNonAscii": false,
       "containsEmail": true,
       "embeddedDomains": ["paypal.com"],
-      "embeddedDomainMatchesFromDomain": false
+      "embeddedDomainMatchesFromDomain": false,
+      "normalized": { "compactedWhitespace": "security@paypal.com" },
+      "metrics": { "whitespaceCompactedChanged": false },
+      "signals": { "spacedDisplayNameCamouflageCandidate": false }
     },
     "localPart": "attacker",
     "localPartLexical": { "length": 8, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },

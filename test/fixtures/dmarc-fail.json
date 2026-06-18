@@ -51,7 +51,10 @@
           "hasNonAscii": false,
           "containsEmail": false,
           "embeddedDomains": [],
-          "embeddedDomainMatchesFromDomain": null
+          "embeddedDomainMatchesFromDomain": null,
+          "normalized": { "compactedWhitespace": "ExampleSender" },
+          "metrics": { "whitespaceCompactedChanged": true },
+          "signals": { "spacedDisplayNameCamouflageCandidate": false }
         },
         "localPart": "notice",
         "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
