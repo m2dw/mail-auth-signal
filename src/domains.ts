@@ -321,7 +321,12 @@ export function parseFromMailbox(value: string | null): {
   if (angleMatch) {
     localPartRaw = angleMatch[1] ?? null;
     domainRaw = angleMatch[2] ?? null;
-    const lt = withoutComments.indexOf("<");
+    // Slice at the matched angle-addr, not the first literal "<": a quoted
+    // display name may legally contain an earlier "<...>" fragment (e.g.
+    // `"Team <notice> service@paypal.com" <attacker@evil.test>`), and cutting at
+    // that earlier "<" would truncate the display name and hide an embedded
+    // address-shaped spoof from the address-in-display-name metric.
+    const lt = angleMatch.index;
     displayName = lt > 0 ? unquoteDisplayName(withoutComments.slice(0, lt)) : null;
   } else {
     const bare = /([^<>@\s]+)@([^<>@\s,;]+)/.exec(withoutComments);

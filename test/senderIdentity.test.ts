@@ -114,6 +114,17 @@ describe("parseFromMailbox — domain agrees with the canonical extractor", () =
       domain: null,
     });
   });
+
+  it("slices the display name at the real angle-addr, not an earlier literal '<'", () => {
+    // The quoted display name legally contains a "<notice>" fragment before the
+    // real mailbox; cutting at the first "<" would truncate it to `"Team` and
+    // drop the embedded address-shaped spoof.
+    expect(parseFromMailbox('"Team <notice> service@paypal.com" <attacker@evil.test>')).toEqual({
+      displayName: "Team <notice> service@paypal.com",
+      localPart: "attacker",
+      domain: "evil.test",
+    });
+  });
 });
 
 describe("senderIdentity — display-name address spoof", () => {
@@ -126,6 +137,18 @@ describe("senderIdentity — display-name address spoof", () => {
     expect(si.displayName.embeddedDomains).toEqual(["paypal.com"]);
     expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
     expect(si.localPart).toBe("attacker");
+    expect(metrics.fromDomain).toBe("evil.test");
+  });
+
+  it("still catches the spoof when the display name holds an earlier '<...>' fragment", () => {
+    const metrics = extractMetrics({
+      headers: { from: '"Team <notice> service@paypal.com" <attacker@evil.test>' },
+    });
+    const si = metrics.senderIdentity;
+    expect(si.displayName.text).toBe("Team <notice> service@paypal.com");
+    expect(si.displayName.containsEmail).toBe(true);
+    expect(si.displayName.embeddedDomains).toEqual(["paypal.com"]);
+    expect(si.displayName.embeddedDomainMatchesFromDomain).toBe(false);
     expect(metrics.fromDomain).toBe("evil.test");
   });
 
