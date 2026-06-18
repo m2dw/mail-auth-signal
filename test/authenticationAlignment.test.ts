@@ -4,8 +4,9 @@ import {
   collectAuthenticationAlignment,
   extractMetrics,
   parseAuthenticationResults,
+  runRules,
 } from "../src/index.js";
-import type { AnalyzeInput, AnalyzeResult } from "../src/index.js";
+import type { AnalyzeInput, AnalyzeResult, AuthenticationAlignment, Rule } from "../src/index.js";
 import headeriFixture from "./fixtures/auth-alignment-headeri.json" with { type: "json" };
 
 const TRUSTED_ID = "mx.example.net";
@@ -224,6 +225,68 @@ describe("collectAuthenticationAlignment — trust supplied at call time", () =>
     expect(trusted.anyAlignedDkimPass).toBe(true);
     expect(trusted.dmarcPass).toBe(true);
     expect(trusted.anyAuthAligned).toBe(true);
+  });
+});
+
+describe("authentication metrics — header-scoped rules see a per-header projection", () => {
+  // A header-scoped rule reading metrics.authentication must see only the current
+  // header's results, not the message-wide projection cached at extraction time.
+  // Two trusted headers: the first aligns SPF/DKIM with From, the second does not.
+  const TWO_HEADERS: AnalyzeInput = {
+    headers: {
+      from: FROM,
+      "authentication-results": [
+        `${TRUSTED_ID}; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com`,
+        `${TRUSTED_ID}; spf=pass smtp.mailfrom=evil.test; dkim=pass header.d=evil.test`,
+      ],
+    },
+    options: { trustedAuthservIds: [TRUSTED_ID] },
+  };
+
+  /** Records the authentication projection each header-scoped invocation observes. */
+  function captureRule(sink: AuthenticationAlignment[]): Rule {
+    return {
+      key: "test.captureAuthentication",
+      scope: "header",
+      evaluate({ metrics }) {
+        sink.push(metrics.authentication);
+        return [];
+      },
+    };
+  }
+
+  it("narrows metrics.authentication to the current header, not all headers", () => {
+    const seen: AuthenticationAlignment[] = [];
+    const metrics = extractMetrics(TWO_HEADERS);
+    runRules(metrics, TWO_HEADERS.options, [captureRule(seen)]);
+
+    expect(seen).toHaveLength(2);
+    // First header: aligned with From.
+    expect(seen[0]?.anyAuthAligned).toBe(true);
+    expect(seen[0]?.dkimAlignedWithFrom).toBe(true);
+    expect(seen[0]?.dkimResults).toHaveLength(1);
+    expect(seen[0]?.dkimResults[0]?.headerD).toBe("example.com");
+    // Second header: passing but unaligned — must not inherit the first header's alignment.
+    expect(seen[1]?.anyAuthAligned).toBe(false);
+    expect(seen[1]?.dkimAlignedWithFrom).toBe(false);
+    expect(seen[1]?.dkimResults).toHaveLength(1);
+    expect(seen[1]?.dkimResults[0]?.headerD).toBe("evil.test");
+    // Each invocation counts only its own header, never all of them.
+    expect(seen[0]?.trustedHeaderCount).toBe(1);
+    expect(seen[1]?.trustedHeaderCount).toBe(1);
+  });
+
+  it("resolves trust from trustedAuthservIds declared to runRules after extraction", () => {
+    // Extract without trust, then declare it to runRules: the per-header projection
+    // must recover trust (mirroring the dmarc header.from rule), not stay untrusted.
+    const seen: AuthenticationAlignment[] = [];
+    const metricsNoTrust = extractMetrics({ headers: TWO_HEADERS.headers });
+    expect(metricsNoTrust.authentication.anyAuthAligned).toBe(false);
+
+    runRules(metricsNoTrust, { trustedAuthservIds: [TRUSTED_ID] }, [captureRule(seen)]);
+    expect(seen[0]?.anyAuthAligned).toBe(true);
+    expect(seen[0]?.trustedHeaderCount).toBe(1);
+    expect(seen[1]?.anyAuthAligned).toBe(false);
   });
 });
 

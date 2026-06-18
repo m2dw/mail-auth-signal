@@ -1,4 +1,6 @@
 import type { AuthenticationResultsHeader, MessageMetrics, AnalyzeOptions, Rule, Signal } from "../types.js";
+import { collectAuthenticationAlignment } from "../metrics.js";
+import { resolveHeaderTrust } from "./trust.js";
 import { missingAuthResultsRule } from "./missingAuthResults.js";
 import { untrustedAuthservIdRule } from "./untrustedAuthservId.js";
 import { authMethodFailureRule } from "./authMethodFailure.js";
@@ -84,7 +86,7 @@ export function runRules(
     const headerRules = rules.slice(i, end);
 
     for (const header of metrics.authenticationResults) {
-      const headerMetrics = headerScopedMetrics(metrics, header);
+      const headerMetrics = headerScopedMetrics(metrics, header, options);
       for (const rule of headerRules) {
         signals.push(...rule.evaluate({ metrics: headerMetrics, options }));
       }
@@ -100,10 +102,25 @@ export function runRules(
  * Narrow metrics to a single Authentication-Results header for header-scoped
  * rule evaluation. All other facts are preserved so header-scoped rules can
  * still read message-level metrics (e.g. fromDomain) if they need to.
+ *
+ * The cached `authentication` projection is recomputed from just this header so
+ * a header-scoped rule reading authentication.anyAuthAligned, the per-method
+ * result lists, or the trusted/untrusted counts sees only the current header's
+ * SPF/DKIM/DMARC results — not another header's. Trust is resolved through
+ * resolveHeaderTrust (mirroring the other Authentication-Results rules) so a
+ * caller declaring trustedAuthservIds to runRules after extracting metrics
+ * without it gets the same projection analyzeMessage would, rather than the
+ * extraction-time trust baked into metrics.authentication.
  */
 function headerScopedMetrics(
   metrics: MessageMetrics,
   header: AuthenticationResultsHeader,
+  options: AnalyzeOptions,
 ): MessageMetrics {
-  return { ...metrics, authenticationResults: [header] };
+  const authentication = collectAuthenticationAlignment(
+    [header],
+    metrics.fromDomain,
+    (h) => resolveHeaderTrust(h, options),
+  );
+  return { ...metrics, authentication, authenticationResults: [header] };
 }
