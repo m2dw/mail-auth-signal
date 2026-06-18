@@ -1,4 +1,5 @@
 export { analyzeMessage } from "./analyze.js";
+export { computeJaro, computeJaroWinkler } from "./jaroWinkler.js";
 export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
 export {
   computeDisplayNameWhitespace,

@@ -52,7 +52,7 @@ logic, it becomes a new follow-up at that time.
 
 | Add-on core module | Classification | Basis |
 |---|---|---|
-| `jaroWinkler.js` (Jaro-Winkler string similarity) | **Needs migration** | A pure, deterministic, data-free string-similarity function — Apache-compatible owner logic with no corpus/list dependency. Verified **absent** from this repo (no similarity/edit-distance code exists here). Belongs in the reusable core exactly as `computeLexicalHeuristics` does. See follow-up below. |
+| `jaroWinkler.js` (Jaro-Winkler string similarity) | **Migrated** | Ported as `src/jaroWinkler.ts`, exporting `computeJaro` and `computeJaroWinkler`. Tests in `test/jaroWinkler.test.ts` (fixtures + invariants). See issue #50. |
 | `bigramNaturalness.js` (bigram "naturalness" scoring) | **Needs decision** | A meaningful naturalness score needs a language-frequency dataset; bundling one crosses the data/license boundary in `AGENTS.md`. `src/types.ts` already documents this as a deliberate omission. The *algorithm* is portable; the *corpus* is the decision. |
 | `customFormulas.js` (user-defined scoring formulas) | **Not core** | Caller-configurable scoring/policy. The core emits observations; callers compose formulas and thresholds. |
 | `whitelist.js` (allow-list matching) | **Not core** | Allow/block lists are explicitly caller-owned by `AGENTS.md`. The data and the trust decision belong to the caller. |
@@ -115,6 +115,7 @@ Thunderbird integration shell (caller-owned):
 | Sender-identity metrics: display name, address-in-display-name spoof, lexical stats, domain parts | `src/senderIdentity.ts` | `test/senderIdentity.test.ts` | #34 |
 | Registrable-domain comparison via caller-injected resolver | `src/senderIdentity.ts` + `MetricsDependencies` | `test/senderIdentity.test.ts` | #34 |
 | Lexical "randomness" heuristics (entropy, vowel ratio, runs, transitions) | `src/senderIdentity.ts` (`computeLexicalHeuristics`) | `test/` lexical tests | #41 |
+| Jaro-Winkler string-similarity helper (`computeJaro`, `computeJaroWinkler`) | `src/jaroWinkler.ts` | `test/jaroWinkler.test.ts` (fixtures + invariants) | #50 |
 | Composite (Layer 4) multi-signal rules | `src/rules/composite/*.ts` | `test/composite.test.ts` | #35 |
 
 All three composite rules — `composite.unauthenticatedFromSpoof`,
@@ -137,22 +138,8 @@ All three composite rules — `composite.unauthenticatedFromSpoof`,
 
 ### Needs migration
 
-1. **`src/core/jaroWinkler.js` — Jaro-Winkler string-similarity helper.** This is
-   a pure, deterministic, data-free function (no word list, brand list, or
-   corpus), so it is owner-controlled and Apache-2.0-compatible, and it fits the
-   reusable-core boundary the same way `computeLexicalHeuristics` does. A
-   repo-wide search confirms **no** similarity / Jaro-Winkler / edit-distance
-   code currently exists in `mail-auth-signal`, so this capability is genuinely
-   absent rather than already ported under another name.
-
-   **Follow-up issue to file:** "Port the Jaro-Winkler string-similarity helper
-   from the add-on as a data-free lexical metric." Scope notes for that issue:
-   the *helper itself* (similarity of two strings) is core; a confusable /
-   lookalike-domain *signal* built on it compares a sender domain against a set
-   of reference domains, and that reference set is caller-owned (cf.
-   `whitelist.js`), so the signal — if added — must take the reference domains as
-   injected input, exactly like the PSL resolver. The issue should settle whether
-   only the helper is ported or a reference-domain-injected signal is added too.
+*(None remaining. `jaroWinkler.js` was the last outstanding item; it was ported
+in issue #50 as `src/jaroWinkler.ts` — see the Migrated table above.)*
 
 ### Needs decision
 
@@ -170,21 +157,19 @@ All three composite rules — `composite.unauthenticatedFromSpoof`,
 
 ## Conclusion
 
-Most of the reusable core from the Thunderbird add-on — header normalization,
+All of the reusable core from the Thunderbird add-on — header normalization,
 `Authentication-Results` parsing, trusted-source resolution, authentication
 outcome/alignment modeling, the per-identifier domain-consistency rules,
-sender-identity metrics, the lexical-heuristics helper, the structured
-rule-evaluation pattern (`ruleRegistry.js` → `src/rules/*` + `src/analyze.ts`),
-the PSL *capability* (as an injected resolver), and the composite detection
-layer — **has been migrated** into `mail-auth-signal`.
+sender-identity metrics, the lexical-heuristics helper, the Jaro-Winkler
+string-similarity helper, the structured rule-evaluation pattern
+(`ruleRegistry.js` → `src/rules/*` + `src/analyze.ts`), the PSL *capability*
+(as an injected resolver), and the composite detection layer — **has been
+migrated** into `mail-auth-signal`.
 
-The migration is **not** complete: per-module review of `src/core/*.js` finds
-one outstanding reusable-core item, **`jaroWinkler.js`** (a pure, data-free
-string-similarity helper), classified **Needs migration** and tracked as a
-concrete follow-up issue. **`bigramNaturalness.js`** is **Needs decision** (it
-needs a license-cleared frequency corpus). The caller-owned modules —
-`customFormulas.js`, `whitelist.js`, `scoring.js`, and the PSL/reference *data* —
-are **Not core** by the package boundary and stay with the caller.
+**`bigramNaturalness.js`** is **Needs decision** (it needs a license-cleared
+frequency corpus). The caller-owned modules — `customFormulas.js`,
+`whitelist.js`, `scoring.js`, and the PSL/reference *data* — are **Not core**
+by the package boundary and stay with the caller.
 
 Future add-on logic will be evaluated case by case against this same four-way
 classification.
