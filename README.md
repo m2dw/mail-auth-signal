@@ -400,6 +400,22 @@ display name itself contains an email address (`containsEmail`), the
 the brand address while the real sender is elsewhere. It is `null` when there is
 nothing to compare, so a plain display name never reads as a mismatch.
 
+`displayName` also exposes a whitespace-normalized view for brand-style matching
+that must see through *letter-spacing camouflage* — a brand name spelled out with
+spaces between its letters, e.g.
+`From: D d a i i c h i L i f e I n s u r a n c e <noreply@evil.test>`, which a
+naive brand-list match against the raw `text` misses entirely.
+`normalized.compactedWhitespace` is the display name with every run of intra-name
+whitespace removed (`DdaiichiLifeInsurance`) — a lexical token to compare against
+your own brand list, never an address. `metrics.whitespaceCompactedChanged` says
+whether compaction changed the token (true whenever any whitespace was removed, so
+a normal multi-word name compacts too). `signals.spacedDisplayNameCamouflageCandidate`
+is the discriminating hint: true only when the display name is dominated by
+single-letter tokens (≥ 3 whitespace-separated tokens, ≥ 3 single Unicode letters,
+and a single-letter majority), so an ordinary name like `Daiichi Life Insurance`
+or one carrying an initial (`John A Smith`, `J P Morgan`) is **not** flagged. As
+always, this is a signal, not a verdict — the core assigns no score.
+
 `fromDomainParts` / `messageIdDomainParts` (`DomainParts`) split a domain into its
 dot-separated `labels` (with `labelCount` and `topLabel`). These need no external
 data. The `registrableDomain` and `subdomainDepth` fields, and

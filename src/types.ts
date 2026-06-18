@@ -351,6 +351,12 @@ export type DomainParts = {
  *                  From domain. null when no comparison was possible (no embedded
  *                  domain, or no From domain); false when any embedded domain
  *                  differs from From — the address-in-display-name spoof shape.
+ * - normalized:   whitespace-normalized views of the display name for brand-style
+ *                  matching. See DisplayNameNormalization.
+ * - metrics:      derived facts about what normalization changed. See
+ *                  DisplayNameDerivedMetrics.
+ * - signals:      boolean shape hints derived from the normalization. See
+ *                  DisplayNameSignals.
  */
 export type DisplayNameMetrics = {
   present: boolean;
@@ -360,6 +366,67 @@ export type DisplayNameMetrics = {
   containsEmail: boolean;
   embeddedDomains: string[];
   embeddedDomainMatchesFromDomain: boolean | null;
+  normalized: DisplayNameNormalization;
+  metrics: DisplayNameDerivedMetrics;
+  signals: DisplayNameSignals;
+};
+
+/**
+ * Whitespace-normalized views of the From display name, for brand-style matching
+ * that must see through letter-spacing camouflage.
+ *
+ * Thunderbird add-on logs showed brand spoofing that inserts spaces between the
+ * letters of a brand name — e.g. `D d a i i c h i L i f e I n s u r a n c e` — so
+ * that a naive substring/brand-list match against the raw display name misses the
+ * brand entirely. Exposing the compacted form here lets a consumer match against
+ * its own brand list without re-implementing the normalization.
+ *
+ * - compactedWhitespace: the display name with every run of intra-name whitespace
+ *   removed, collapsing a spaced-out brand name into a single matchable token
+ *   (`D d a i i c h i L i f e` -> `DdaiichiLife`). null when no display name is
+ *   present. Casing is preserved and no other folding is applied — the core forms
+ *   no opinion and bundles no brand list. This is a lexical token for the caller
+ *   to compare, **never** an email address: it is not parsed, validated, or used
+ *   as a mailbox by the core, so a normal multi-word name compacting to something
+ *   address-shaped carries no address meaning here.
+ */
+export type DisplayNameNormalization = {
+  compactedWhitespace: string | null;
+};
+
+/**
+ * Derived facts about the display-name normalization (see
+ * DisplayNameNormalization).
+ *
+ * - whitespaceCompactedChanged: whether whitespace compaction changed the
+ *   effective display-name token, i.e. the raw display name contained any
+ *   intra-name whitespace that compaction removed. false when no display name is
+ *   present or it held no whitespace. This is a plain metric, not a verdict: a
+ *   normal multi-word name ("Example Sender") also compacts, so a true value alone
+ *   says nothing about intent — pair it with spacedDisplayNameCamouflageCandidate.
+ */
+export type DisplayNameDerivedMetrics = {
+  whitespaceCompactedChanged: boolean;
+};
+
+/**
+ * Boolean shape hints derived from the display-name normalization. Like every
+ * other field in this package these are observations, never verdicts — the caller
+ * owns thresholds and policy, and the core assigns no score.
+ *
+ * - spacedDisplayNameCamouflageCandidate: whether the display name looks like a
+ *   brand name camouflaged by letter-spacing — many single-character,
+ *   whitespace-separated alphabetic tokens (`D d a i i c h i L i f e`). It is
+ *   true only when the display name has at least 3 whitespace-separated tokens, at
+ *   least 3 of them are single Unicode letters, and single-letter tokens make up a
+ *   majority (>= 60%) of all tokens. These thresholds keep normal multi-word human
+ *   names ("Example Sender") and names with an initial or two ("John A Smith",
+ *   "J P Morgan") from reading as camouflage, while still firing on a fully or
+ *   mostly letter-spaced brand. Computed from the token itself with no bundled
+ *   word list or brand dictionary.
+ */
+export type DisplayNameSignals = {
+  spacedDisplayNameCamouflageCandidate: boolean;
 };
 
 /**
