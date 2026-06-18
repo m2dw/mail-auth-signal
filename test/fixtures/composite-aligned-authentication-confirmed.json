@@ -1,0 +1,113 @@
+{
+  "description": "Composite Layer 4 (false-positive mitigation): a fully aligned, trusted message. From, Message-ID, Reply-To, Return-Path, smtp.mailfrom, DKIM header.d, and DMARC header.from all resolve to example.com and every method passes, so the base layer is silent. The composite layer adds one info-severity composite.alignedAuthenticationConfirmed — the single positive marker a caller needs to confidently lower a score. It gates on real aligned trusted authentication for the visible From, which a spoofer of another domain cannot produce, so it cannot be used to launder a forgery.",
+  "input": {
+    "headers": {
+      "from": "Example Sender <notice@example.com>",
+      "message-id": "<id@example.com>",
+      "reply-to": "<notice@example.com>",
+      "return-path": "<notice@example.com>",
+      "authentication-results": [
+        "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+      ]
+    },
+    "options": {
+      "trustedAuthservIds": ["mx.example.net"]
+    }
+  },
+  "expected": {
+    "metrics": {
+      "fromDomain": "example.com",
+      "messageIdDomain": "example.com",
+      "messageIdDomainMatchesFromDomain": true,
+      "replyToDomains": ["example.com"],
+      "replyToDomainMatchesFromDomain": true,
+      "returnPathDomain": "example.com",
+      "returnPathNullReversePath": false,
+      "returnPathDomainMatchesFromDomain": true,
+      "smtpMailfromDomains": ["example.com"],
+      "smtpMailfromDomainMatchesFromDomain": true,
+      "envelopeSenderDomainsAgree": true,
+      "dkimDomains": ["example.com"],
+      "dkimDomainMatchesFromDomain": true,
+      "dmarcHeaderFromDomains": ["example.com"],
+      "dmarcHeaderFromMatchesFromDomain": true,
+      "authentication": {
+        "trustedHeaderCount": 1,
+        "untrustedHeaderCount": 0,
+        "dmarcResults": [
+          { "result": "pass", "headerFrom": "example.com", "trusted": true }
+        ],
+        "spfResults": [
+          { "result": "pass", "smtpMailfrom": "example.com", "trusted": true }
+        ],
+        "dkimResults": [
+          { "result": "pass", "headerD": "example.com", "headerI": null, "trusted": true }
+        ],
+        "spfAlignedWithFrom": true,
+        "dkimAlignedWithFrom": true,
+        "anyAlignedSpfPass": true,
+        "anyAlignedDkimPass": true,
+        "dmarcPass": true,
+        "anyAuthAligned": true
+      },
+      "senderIdentity": {
+        "displayName": {
+          "present": true,
+          "text": "Example Sender",
+          "length": 14,
+          "hasNonAscii": false,
+          "containsEmail": false,
+          "embeddedDomains": [],
+          "embeddedDomainMatchesFromDomain": null
+        },
+        "localPart": "notice",
+        "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "fromDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdDomainParts": {
+          "domain": "example.com",
+          "labels": ["example", "com"],
+          "labelCount": 2,
+          "topLabel": "com",
+          "registrableDomain": null,
+          "subdomainDepth": null
+        },
+        "messageIdRegistrableDomainMatchesFromDomain": null
+      },
+      "authenticationResults": [
+        {
+          "raw": "mx.example.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com",
+          "authservId": "mx.example.net",
+          "trusted": true,
+          "methods": [
+            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
+            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
+            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+          ]
+        }
+      ]
+    },
+    "signals": [
+      {
+        "key": "composite.alignedAuthenticationConfirmed",
+        "category": "composite",
+        "severity": "info",
+        "message": "Visible From domain has aligned, trusted authentication with no conflicting signal.",
+        "data": {
+          "fromDomain": "example.com",
+          "anyAlignedSpfPass": true,
+          "anyAlignedDkimPass": true,
+          "dmarcPass": true,
+          "contributingSignals": []
+        }
+      }
+    ]
+  }
+}

@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- Ported the Layer 4 composite rule framework as reusable signal rules (issue #35):
+  - Added a composite-rule framework alongside the per-metric base rules: the
+    `CompositeRule` / `CompositeRuleContext` types and `runCompositeRules`. A
+    composite rule reads both the extracted metrics and the base signals already
+    produced for the message, so it can combine several lower-layer outcomes
+    (authentication + consistency + identity) into one higher-confidence
+    observation. Composite signals use the new `"composite"` `SignalCategory` and
+    name the lower-layer signal keys that justified them in
+    `data.contributingSignals`.
+  - Composite rules are an opt-in layer: `analyzeMessage(input, rules?, deps?, compositeRules?)`
+    gained an optional fourth argument that defaults to none, so the default
+    output is unchanged unless a caller passes `defaultCompositeRules`. They emit
+    structured signals only — never a Thunderbird action, score, or
+    allow/block/move/notify decision.
+  - Ported three composites, each with attacker-model documentation:
+    - `composite.unauthenticatedFromSpoof` (high): the visible From has no
+      aligned, trusted authentication **and** another sender identifier disagrees
+      with it — the direct domain-impersonation shape. Guarded to stay silent on
+      unevaluable messages (no trusted header) and honest auth misconfigurations
+      (no identifier mismatch).
+    - `composite.authenticatedDisplayNameSpoof` (medium): a message that
+      authenticates for its real From domain yet carries a display name addressing
+      a different domain — the authenticated-lookalike case a pure auth/Junk filter
+      would wave through.
+    - `composite.alignedAuthenticationConfirmed` (info): a false-positive
+      mitigation that affirms a clean, aligned, trusted message. It gates on real
+      aligned authentication for the visible From (which a spoofer of another
+      domain cannot produce) and withholds on any conflicting auth/consistency
+      signal or misleading display name, so it cannot be used to launder a
+      forgery. Its guard conditions are documented inline.
+  - Added `test/composite.test.ts` and the `composite-unauthenticated-from-spoof`,
+    `composite-authenticated-displayname-spoof`, and
+    `composite-aligned-authentication-confirmed` serializable fixtures. The parity
+    corpus and existing fixtures are unchanged, confirming the default pipeline is
+    byte-for-byte identical.
+
 - Ported sender-identity metrics (issue #34):
   - Added `MessageMetrics.senderIdentity` (`SenderIdentityMetrics`): a
     serializable, scoring-free view of the sender's identity shape derived from

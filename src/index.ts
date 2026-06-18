@@ -32,11 +32,20 @@ export {
   dmarcHeaderFromMismatchRule,
   envelopeSenderDisagreementRule,
 } from "./rules/index.js";
+export {
+  defaultCompositeRules,
+  runCompositeRules,
+  unauthenticatedFromSpoofRule,
+  authenticatedDisplayNameSpoofRule,
+  alignedAuthenticationConfirmedRule,
+} from "./rules/composite/index.js";
 export type {
   AnalyzeInput,
   AnalyzeOptions,
   AnalyzeResult,
   AuthenticationAlignment,
+  CompositeRule,
+  CompositeRuleContext,
   AuthenticationMethodResult,
   AuthenticationResultsHeader,
   DisplayNameMetrics,
