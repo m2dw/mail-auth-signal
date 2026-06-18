@@ -38,6 +38,7 @@ export {
   runCompositeRules,
   unauthenticatedFromSpoofRule,
   authenticatedDisplayNameSpoofRule,
+  unsecuredDeepSubdomainCandidateRule,
   alignedAuthenticationConfirmedRule,
 } from "./rules/composite/index.js";
 export type {
