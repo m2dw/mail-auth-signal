@@ -118,10 +118,12 @@ Thunderbird integration shell (caller-owned):
 | Jaro-Winkler string-similarity helper (`computeJaro`, `computeJaroWinkler`) | `src/jaroWinkler.ts` | `test/jaroWinkler.test.ts` (fixtures + invariants) | #50 |
 | Composite (Layer 4) multi-signal rules | `src/rules/composite/*.ts` | `test/composite.test.ts` | #35 |
 
-All three composite rules — `composite.unauthenticatedFromSpoof`,
-`composite.authenticatedDisplayNameSpoof`, and the false-positive-mitigating
-`composite.alignedAuthenticationConfirmed` — are migrated as structured signals
-(no Thunderbird action attached).
+All five composite rules — `composite.unauthenticatedFromSpoof`,
+`composite.publicMailboxSpoofingCandidate` (issue #47),
+`composite.authenticatedDisplayNameSpoof`,
+`composite.unsecuredDeepSubdomainCandidate` (issue #48), and the
+false-positive-mitigating `composite.alignedAuthenticationConfirmed` — are
+migrated as structured signals (no Thunderbird action attached).
 
 ### Not core (intentionally caller-owned, not migrated)
 

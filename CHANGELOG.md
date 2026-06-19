@@ -17,7 +17,7 @@
     `bigramNaturalness.js` remains *Needs decision* (license-cleared corpus required).
 
 - Added DMARC-none deep-subdomain composite signal (issue #48):
-  - Added the opt-in `composite.unsecuredDeepSubdomainCandidate` rule (medium):
+  - Added the opt-in `composite.unsecuredDeepSubdomainCandidate` rule (low):
     fires when the visible From is on a deep subdomain (`subdomainDepth ≥ 2`, PSL-
     derived via caller-supplied `getRegistrableDomain`) **and** a trusted verifier
     reported `dmarc=none` for that From's organizational domain. Neither condition
