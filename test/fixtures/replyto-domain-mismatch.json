@@ -10,44 +10,81 @@
       ]
     },
     "options": {
-      "trustedAuthservIds": ["mx.example.net"]
+      "trustedAuthservIds": [
+        "mx.example.net"
+      ]
     }
   },
   "expected": {
     "metrics": {
       "fromDomain": "example.com",
+      "senderDomain": null,
+      "senderDomainMatchesFromDomain": null,
+      "senderDomainRegistrableMatchesFromDomain": null,
       "messageIdDomain": "example.com",
       "messageIdDomainMatchesFromDomain": true,
-      "replyToDomains": ["evil.test"],
+      "replyToDomains": [
+        "evil.test"
+      ],
       "replyToDomainMatchesFromDomain": false,
+      "replyToDomainRegistrableMatchesFromDomain": false,
       "returnPathDomain": null,
       "returnPathNullReversePath": false,
       "returnPathDomainMatchesFromDomain": null,
+      "returnPathDomainRegistrableMatchesFromDomain": null,
       "smtpMailfromDomains": ["example.com"],
       "smtpMailfromDomainMatchesFromDomain": true,
       "envelopeSenderDomainsAgree": null,
-      "dkimDomains": ["example.com"],
+      "dkimDomains": [
+        "example.com"
+      ],
       "dkimDomainMatchesFromDomain": true,
-      "dmarcHeaderFromDomains": ["example.com"],
+      "dmarcHeaderFromDomains": [
+        "example.com"
+      ],
       "dmarcHeaderFromMatchesFromDomain": true,
       "authentication": {
         "trustedHeaderCount": 1,
         "untrustedHeaderCount": 0,
         "dmarcResults": [
-          { "result": "pass", "headerFrom": "example.com", "trusted": true }
+          {
+            "result": "pass",
+            "headerFrom": "example.com",
+            "trusted": true
+          }
         ],
         "spfResults": [
-          { "result": "pass", "smtpMailfrom": "example.com", "trusted": true }
+          {
+            "result": "pass",
+            "smtpMailfrom": "example.com",
+            "trusted": true
+          }
         ],
         "dkimResults": [
-          { "result": "pass", "headerD": "example.com", "headerI": null, "trusted": true }
+          {
+            "result": "pass",
+            "headerD": "example.com",
+            "headerI": null,
+            "trusted": true
+          }
         ],
         "spfAlignedWithFrom": true,
         "dkimAlignedWithFrom": true,
         "anyAlignedSpfPass": true,
         "anyAlignedDkimPass": true,
         "dmarcPass": true,
-        "anyAuthAligned": true
+        "anyAuthAligned": true,
+        "organizational": {
+          "resolverAvailable": false,
+          "spfAligned": true,
+          "dkimAligned": true,
+          "anySpfAligned": true,
+          "anyDkimAligned": true,
+          "anyAuthAligned": true,
+          "dmarcPassAligned": true,
+          "unalignedPassingSpfDomains": [],
+          "unalignedPassingDkimDomains": []
+        }
       },
       "senderIdentity": {
         "displayName": {
@@ -58,30 +95,86 @@
           "containsEmail": false,
           "embeddedDomains": [],
           "embeddedDomainMatchesFromDomain": null,
-          "normalized": { "compactedWhitespace": "ExampleSender" },
-          "metrics": { "whitespaceCompactedChanged": true },
-          "signals": { "spacedDisplayNameCamouflageCandidate": false }
+          "normalized": {
+            "compactedWhitespace": "ExampleSender",
+            "latinFolded": "Example Sender"
+          },
+          "metrics": {
+            "whitespaceCompactedChanged": true,
+            "latinFoldedChanged": false
+          },
+          "signals": {
+            "spacedDisplayNameCamouflageCandidate": false,
+            "hasNonLatinScript": false,
+            "hasMixedScript": false
+          }
         },
         "localPart": "notice",
-        "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
-        "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+        "localPartLexical": {
+          "length": 6,
+          "digitCount": 0,
+          "hyphenCount": 0,
+          "hasNonAscii": false
+        },
+        "fromDomainLexical": {
+          "length": 11,
+          "digitCount": 0,
+          "hyphenCount": 0,
+          "hasNonAscii": false
+        },
         "fromDomainParts": {
           "domain": "example.com",
-          "labels": ["example", "com"],
+          "labels": [
+            "example",
+            "com"
+          ],
           "labelCount": 2,
           "topLabel": "com",
-          "registrableDomain": null,
-          "subdomainDepth": null
+          "registrableDomain": "example.com",
+          "subdomainDepth": 0,
+          "labelMetrics": [
+            {
+              "label": "example",
+              "isPunycode": false,
+              "hasConsecutiveHyphen": false
+            },
+            {
+              "label": "com",
+              "isPunycode": false,
+              "hasConsecutiveHyphen": false
+            }
+          ],
+          "hasConsecutiveHyphen": false,
+          "hasPunycodeLabel": false,
+          "hasConsecutiveHyphenOutsidePunycode": false
         },
         "messageIdDomainParts": {
           "domain": "example.com",
-          "labels": ["example", "com"],
+          "labels": [
+            "example",
+            "com"
+          ],
           "labelCount": 2,
           "topLabel": "com",
-          "registrableDomain": null,
-          "subdomainDepth": null
+          "registrableDomain": "example.com",
+          "subdomainDepth": 0,
+          "labelMetrics": [
+            {
+              "label": "example",
+              "isPunycode": false,
+              "hasConsecutiveHyphen": false
+            },
+            {
+              "label": "com",
+              "isPunycode": false,
+              "hasConsecutiveHyphen": false
+            }
+          ],
+          "hasConsecutiveHyphen": false,
+          "hasPunycodeLabel": false,
+          "hasConsecutiveHyphenOutsidePunycode": false
         },
-        "messageIdRegistrableDomainMatchesFromDomain": null,
+        "messageIdRegistrableDomainMatchesFromDomain": true,
         "fromDomainIsPublicMailboxProvider": false,
         "publicMailboxProviderId": null
       },
@@ -91,9 +184,27 @@
           "authservId": "mx.example.net",
           "trusted": true,
           "methods": [
-            { "method": "dmarc", "result": "pass", "properties": { "header.from": "example.com" } },
-            { "method": "spf", "result": "pass", "properties": { "smtp.mailfrom": "example.com" } },
-            { "method": "dkim", "result": "pass", "properties": { "header.d": "example.com" } }
+            {
+              "method": "dmarc",
+              "result": "pass",
+              "properties": {
+                "header.from": "example.com"
+              }
+            },
+            {
+              "method": "spf",
+              "result": "pass",
+              "properties": {
+                "smtp.mailfrom": "example.com"
+              }
+            },
+            {
+              "method": "dkim",
+              "result": "pass",
+              "properties": {
+                "header.d": "example.com"
+              }
+            }
           ]
         }
       ]
@@ -106,8 +217,12 @@
         "message": "Reply-To domain differs from the From domain.",
         "data": {
           "fromDomain": "example.com",
-          "replyToDomains": ["evil.test"],
-          "mismatchedDomains": ["evil.test"]
+          "replyToDomains": [
+            "evil.test"
+          ],
+          "mismatchedDomains": [
+            "evil.test"
+          ]
         }
       }
     ]

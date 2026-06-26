@@ -202,6 +202,86 @@ export type AuthenticationAlignment = {
    * From domain backed by at least one aligned authenticated identifier.
    */
   anyAuthAligned: boolean;
+  /**
+   * Public Suffix List–aware (organizational-domain) alignment, the practical
+   * default DMARC uses: a From subdomain counts as aligned with the
+   * organizational domain its authenticated identifiers sit under (e.g. a
+   * `header.d=bounce.example.co.jp` signature aligns with a From at
+   * `news.example.co.jp`). The exact-domain fields above stay available alongside
+   * it. See OrganizationalAlignment.
+   */
+  organizational: OrganizationalAlignment;
+};
+
+/**
+ * Public Suffix List–aware (organizational-domain) alignment of a message's
+ * trusted, passing authentication against the visible From domain — the form of
+ * alignment DMARC actually evaluates under relaxed mode, and the practical
+ * default for a caller deciding whether the From is backed by authentication.
+ *
+ * This mirrors the exact-domain flags on AuthenticationAlignment but compares
+ * *registrable* domains: From `news.example.co.jp` is aligned with an
+ * authenticated `example.co.jp` (or `bounce.example.co.jp`) identifier, where the
+ * exact-domain flags would read that subdomain difference as unaligned. The same
+ * trust + pass gating applies — only trusted Authentication-Results headers and
+ * only passing results may vote — so a forged or non-passing result can never
+ * make a spoof read as organizationally aligned.
+ *
+ * Computing the registrable boundary correctly (e.g. `co.jp` vs `com`) requires
+ * Public Suffix List data, which this package intentionally does not bundle (see
+ * the license boundary in NOTICE / AGENTS.md). The boundary is therefore taken
+ * from the caller-supplied MetricsDependencies.getRegistrableDomain resolver.
+ * When no resolver is supplied these fields degrade cleanly to exact-domain
+ * comparison (a domain is its own organizational domain), so they stay populated
+ * and usable — just no broader than the exact-domain flags — and resolverAvailable
+ * records which mode produced them.
+ *
+ * All values are JSON-serializable for logging, fixtures, and cross-language
+ * comparison.
+ *
+ * - resolverAvailable: whether a registrable-domain resolver was supplied. false
+ *   means these fields fell back to exact-domain comparison (no PSL applied).
+ * - spfAligned: whether every trusted, passing SPF `smtp.mailfrom` shares a
+ *   registrable domain with From. null when no comparison was possible (missing
+ *   From, or no trusted+passing SPF carrying a smtp.mailfrom domain). false when
+ *   any such domain is on a different organization.
+ * - dkimAligned: whether every trusted, passing DKIM `header.d` shares a
+ *   registrable domain with From. null when no comparison was possible. false
+ *   when any signing domain is on a different organization.
+ * - anySpfAligned: true when at least one trusted, passing SPF `smtp.mailfrom`
+ *   shares a registrable domain with From (DMARC's SPF leg under relaxed mode).
+ * - anyDkimAligned: true when at least one trusted, passing DKIM signature's
+ *   `header.d` shares a registrable domain with From (DMARC's DKIM leg under
+ *   relaxed mode — passes if any aligned signature passes).
+ * - anyAuthAligned: anySpfAligned || anyDkimAligned — the organizational
+ *   DMARC-style summary that the From organization is backed by at least one
+ *   aligned authenticated identifier. This is the practical default a caller
+ *   should prefer over the exact-domain anyAuthAligned.
+ * - dmarcPassAligned: true when at least one trusted DMARC `result=pass` carries a
+ *   `header.from` that shares a registrable domain with From. This covers an
+ *   aggregate verifier that emits only `dmarc=pass header.from=example.co.jp`
+ *   (no SPF/DKIM method lines) for a From subdomain such as `news.example.co.jp`,
+ *   which the SPF/DKIM-derived anyAuthAligned cannot see. Only trusted passes vote,
+ *   and with no resolver this degrades to exact-domain comparison.
+ * - unalignedPassingSpfDomains: the trusted, passing SPF `smtp.mailfrom` domains
+ *   that do *not* share a registrable domain with From, in encounter order and
+ *   deduplicated. Empty when From is absent or every passing SPF aligns. Lets a
+ *   caller surface "authenticated, but for another organization" without
+ *   re-deriving it.
+ * - unalignedPassingDkimDomains: the trusted, passing DKIM `header.d` signing
+ *   domains that do not share a registrable domain with From, in encounter order
+ *   and deduplicated. Empty when From is absent or every passing signature aligns.
+ */
+export type OrganizationalAlignment = {
+  resolverAvailable: boolean;
+  spfAligned: boolean | null;
+  dkimAligned: boolean | null;
+  anySpfAligned: boolean;
+  anyDkimAligned: boolean;
+  anyAuthAligned: boolean;
+  dmarcPassAligned: boolean;
+  unalignedPassingSpfDomains: string[];
+  unalignedPassingDkimDomains: string[];
 };
 
 /**
@@ -272,6 +352,17 @@ export type LexicalStats = {
  *                          by ASCII letters, in [0, 1]. 0 when the token has no
  *                          ASCII letters. An unusually low ratio is a weak hint of
  *                          an unpronounceable / machine-generated token.
+ * - digitRatio:            ASCII digits (0-9) divided by length, in [0, 1]. 0 for
+ *                          an empty token. A high ratio is a weak hint of a numeric
+ *                          identifier rather than a word. (The raw digitCount lives
+ *                          in LexicalStats; this is its length-normalized form.)
+ * - hyphenRatio:           ASCII hyphens (`-`) divided by length, in [0, 1]. 0 for
+ *                          an empty token. Heavy hyphenation is a common shape of
+ *                          look-alike / padded labels (e.g. `secure-paypal-login`).
+ * - maxHexRun:             length of the longest run of consecutive ASCII
+ *                          hexadecimal characters (0-9, a-f, A-F). A long run is a
+ *                          weak hint of a hex token (a hash, GUID fragment, or
+ *                          machine id) rather than a word. 0 for an empty token.
  * - maxConsonantRun:       length of the longest run of consecutive ASCII
  *                          consonants. Long runs are atypical of natural words.
  * - maxRepeatedCharRun:    length of the longest run of the same codepoint
@@ -283,28 +374,91 @@ export type LexicalStats = {
  *                          an ASCII letter and an ASCII digit in either direction
  *                          (e.g. 2 for "ab12ab"). Frequent letter/digit
  *                          alternation is a common shape of obfuscated tokens.
+ *
+ * The remaining fields restore parity with the add-on's `lexicalMetrics.js`: they
+ * are the raw counts and `y`-aware / digit-required variants the add-on owned, all
+ * still computed from the token alone with no bundled data.
+ *
+ * - alphaLength:           number of ASCII letters (a-z, A-Z). The denominator the
+ *                          add-on used for its alpha-only ratios; complements
+ *                          LexicalStats.length (all codepoints). 0 for an empty or
+ *                          letter-free token.
+ * - vowelCount:            number of ASCII vowels counting **y** (a, e, i, o, u, y;
+ *                          case-insensitive). Distinct from vowelRatio's numerator,
+ *                          which excludes y; the add-on kept a y-inclusive count
+ *                          because y is a vowel often enough that excluding it
+ *                          under-counts pronounceability.
+ * - vowelRatioAlphaOnly:   vowelCount (y-inclusive) divided by alphaLength, in
+ *                          [0, 1]. 0 when the token has no ASCII letters. The
+ *                          y-inclusive companion to vowelRatio.
+ * - hyphenCount:           number of ASCII hyphens (`-`). The raw count behind
+ *                          hyphenRatio (mirrors LexicalStats.hyphenCount so a caller
+ *                          reading only LexicalHeuristics still sees it).
+ * - uniqueCharCount:       number of distinct codepoints. The raw count behind
+ *                          uniqueCharRatio. 0 for an empty token.
+ * - letterDigitTransitionCount: like letterDigitTransitions but **symbol-skipping**:
+ *                          it counts a letter<->digit class change across any
+ *                          intervening non-alphanumeric characters, so "ab-12"
+ *                          counts 1 (the hyphen is skipped) where
+ *                          letterDigitTransitions counts 0 (the pair is not
+ *                          adjacent). Catches alternation padded with separators.
+ * - hasLongHexLikeRun:     whether the token contains a run of at least
+ *                          HEX_LIKE_RUN_MIN_LENGTH consecutive ASCII hex characters
+ *                          that **includes at least one digit**. Stricter than
+ *                          maxHexRun, which also counts pure-letter runs (a real
+ *                          word such as "deadbeef" makes maxHexRun 8 but
+ *                          hasLongHexLikeRun false): requiring a digit isolates the
+ *                          hash/GUID-fragment shape from ordinary words made of
+ *                          a-f letters.
  */
 export type LexicalHeuristics = {
   shannonEntropy: number;
   normalizedEntropy: number;
   vowelRatio: number;
+  digitRatio: number;
+  hyphenRatio: number;
+  maxHexRun: number;
   maxConsonantRun: number;
   maxRepeatedCharRun: number;
   uniqueCharRatio: number;
   letterDigitTransitions: number;
+  alphaLength: number;
+  vowelCount: number;
+  vowelRatioAlphaOnly: number;
+  hyphenCount: number;
+  uniqueCharCount: number;
+  letterDigitTransitionCount: number;
+  hasLongHexLikeRun: boolean;
+};
+
+/**
+ * Per-label metrics for one dot-separated domain label, exposing consecutive
+ * hyphen patterns and punycode detection.
+ *
+ * - label:               the normalized label string.
+ * - isPunycode:          whether the label starts with the ACE prefix `xn--`,
+ *                        marking it as an internationalized (punycode-encoded)
+ *                        domain label. The `--` in `xn--` is the ACE encoding
+ *                        marker and is not by itself a suspicious pattern.
+ * - hasConsecutiveHyphen: whether the label contains two or more consecutive
+ *                        hyphens (`--`) anywhere in its text.
+ */
+export type DomainLabelMetrics = {
+  label: string;
+  isPunycode: boolean;
+  hasConsecutiveHyphen: boolean;
 };
 
 /**
  * Structural decomposition of a domain into its dot-separated labels, plus an
- * optional registrable-domain view.
+ * optional registrable-domain view, and per-label/domain-level consecutive-hyphen
+ * and punycode metrics.
  *
  * The label-based fields (labels/labelCount/topLabel) need no external data and
- * are always populated. The registrable-domain fields require a caller-supplied
- * Public Suffix List resolver (MetricsDependencies.getRegistrableDomain) because
- * deciding where the registrable boundary falls (e.g. "co.uk" vs "com") cannot be
- * done correctly without PSL data, which this package intentionally does not
- * bundle (see the licensing boundary in NOTICE / AGENTS.md). When no resolver is
- * supplied — the default — those fields stay null rather than being guessed.
+ * are always populated. The registrable-domain fields are populated by the
+ * built-in tldts-backed resolver that runs by default; a caller may supply a
+ * different resolver via MetricsDependencies.getRegistrableDomain, or opt out
+ * of PSL resolution entirely by passing `getRegistrableDomain: () => null`.
  *
  * - domain:             the normalized domain these parts describe.
  * - labels:             dot-separated labels, left to right (e.g.
@@ -312,11 +466,19 @@ export type LexicalHeuristics = {
  * - labelCount:         number of labels — the raw subdomain depth.
  * - topLabel:           the rightmost label (a syntactic TLD-ish label, with no
  *                       PSL applied, so "co" for "example.co.uk").
- * - registrableDomain:  the registrable (organizational) domain when a resolver
- *                       supplied one, else null.
+ * - registrableDomain:  the registrable (organizational) domain, or null when
+ *                       the resolver returns null for this domain.
  * - subdomainDepth:     labels appearing above the registrable domain (0 when the
  *                       domain *is* its registrable domain), else null when no
  *                       resolver supplied a registrable domain.
+ * - labelMetrics:       per-label consecutive-hyphen and punycode facts, in the
+ *                       same left-to-right order as `labels`.
+ * - hasConsecutiveHyphen: whether any label in the domain contains `--`.
+ * - hasPunycodeLabel:   whether any label starts with the ACE prefix `xn--`.
+ * - hasConsecutiveHyphenOutsidePunycode: whether any non-punycode label contains
+ *                       `--`. The `--` inside an `xn--` label is the ACE marker
+ *                       and is excluded here; only labels that are not themselves
+ *                       punycode contribute to this flag.
  */
 export type DomainParts = {
   domain: string;
@@ -325,6 +487,10 @@ export type DomainParts = {
   topLabel: string;
   registrableDomain: string | null;
   subdomainDepth: number | null;
+  labelMetrics: DomainLabelMetrics[];
+  hasConsecutiveHyphen: boolean;
+  hasPunycodeLabel: boolean;
+  hasConsecutiveHyphenOutsidePunycode: boolean;
 };
 
 /**
@@ -389,9 +555,19 @@ export type DisplayNameMetrics = {
  *   to compare, **never** an email address: it is not parsed, validated, or used
  *   as a mailbox by the core, so a normal multi-word name compacting to something
  *   address-shaped carries no address meaning here.
+ *
+ * - latinFolded: the display name text after Latin-diacritic folding — NFD
+ *   normalization followed by removal of combining diacritical marks — making a
+ *   name like `HERMÈS` comparable as `HERMES` for brand inference. Populated only
+ *   when every non-ASCII codepoint in the display name belongs to the Latin script;
+ *   null when the display name is absent or contains non-Latin-script characters
+ *   (Cyrillic, Greek, CJK, etc.) that must not be silently coerced into Latin text.
+ *   This is the raw text after folding — whitespace is preserved as-is. Consumers
+ *   may combine this with `compactedWhitespace` processing for full normalization.
  */
 export type DisplayNameNormalization = {
   compactedWhitespace: string | null;
+  latinFolded: string | null;
 };
 
 /**
@@ -404,9 +580,16 @@ export type DisplayNameNormalization = {
  *   present or it held no whitespace. This is a plain metric, not a verdict: a
  *   normal multi-word name ("Example Sender") also compacts, so a true value alone
  *   says nothing about intent — pair it with spacedDisplayNameCamouflageCandidate.
+ *
+ * - latinFoldedChanged: whether Latin-diacritic folding changed the display-name
+ *   text, i.e. the text contained at least one combining diacritic mark that was
+ *   stripped (e.g. `HERMÈS` → `HERMES`). false when no display name is present,
+ *   when `latinFolded` is null (non-Latin or mixed-script text), or when the text
+ *   was already plain ASCII with no combining marks.
  */
 export type DisplayNameDerivedMetrics = {
   whitespaceCompactedChanged: boolean;
+  latinFoldedChanged: boolean;
 };
 
 /**
@@ -424,9 +607,185 @@ export type DisplayNameDerivedMetrics = {
  *   "J P Morgan") from reading as camouflage, while still firing on a fully or
  *   mostly letter-spaced brand. Computed from the token itself with no bundled
  *   word list or brand dictionary.
+ *
+ * - hasNonLatinScript: whether the display name contains at least one non-ASCII
+ *   codepoint that does not belong to the Latin Unicode script — for example a
+ *   Cyrillic, Greek, Arabic, or CJK character. When true, `latinFolded` is null
+ *   because the text cannot be safely treated as Latin for brand inference.
+ *
+ * - hasMixedScript: whether the display name mixes Latin characters (ASCII letters
+ *   or Latin-script non-ASCII codepoints) with non-Latin-script non-ASCII
+ *   codepoints. This is the homoglyph/lookalike-attack pattern — e.g. a Cyrillic
+ *   `Н` (looks like Latin `N`) placed among Latin letters (`НERMES`). A true value
+ *   means the caller cannot safely compare the display name against Latin brand
+ *   names without further homoglyph detection. false when the display name is
+ *   entirely ASCII, entirely Latin-extended, or entirely non-Latin; only true for
+ *   the mixed case.
  */
 export type DisplayNameSignals = {
   spacedDisplayNameCamouflageCandidate: boolean;
+  hasNonLatinScript: boolean;
+  hasMixedScript: boolean;
+};
+
+/**
+ * One entry in a caller-supplied brand catalog used for display-name brand
+ * inference (see DisplayNameBrandInference). The catalog maps a brand token a
+ * sender's display name might spell out to the registrable domain(s) that brand
+ * legitimately sends from, so the core can tell "display name reads as Brand X but
+ * From is not one of Brand X's domains" — the classic brand-impersonation shape.
+ *
+ * The core bundles **no** brand catalog: brand/top-domain lists are exactly the
+ * kind of external data the package keeps out (see AGENTS.md / NOTICE), so this is
+ * caller-supplied data (like MetricsDependencies.publicMailboxProviders may be,
+ * but with no built-in default). A consumer passes its own catalog via
+ * MetricsDependencies.brandCatalog; without one, brand inference is simply not
+ * performed and SenderIdentityMetrics.brandInference is omitted.
+ *
+ * - brand:   the brand token to match the normalized display name against. It is
+ *            matched after the same normalization the display name receives
+ *            (Latin diacritics folded, lower-cased, non-alphanumerics stripped),
+ *            so an entry should be written in that normalized form, e.g. "paypal",
+ *            "hermes", "daiichilife". Casing and diacritics in the entry are
+ *            normalized defensively so a catalog need not pre-fold.
+ * - domains: the registrable domains the brand legitimately sends from, lower-
+ *            cased (e.g. ["paypal.com"]). Comparison against the From domain is
+ *            exact and case-insensitive; no Public Suffix List logic is applied to
+ *            these, so they must already be registrable domains.
+ */
+export type BrandCatalogEntry = {
+  brand: string;
+  domains: readonly string[];
+};
+
+/**
+ * Why display-name brand inference produced no actionable result (see
+ * DisplayNameBrandInference.notApplicableReason). Each reason is a deliberate
+ * guardrail, not an error — the core declines to guess rather than emit a
+ * low-confidence or attacker-manipulable brand claim.
+ *
+ * - "no-display-name":    the From header carried no display name to infer from.
+ * - "non-latin-script":   the display name's letters are entirely non-Latin (e.g.
+ *                         all CJK or all Cyrillic). Brand-token folding is defined
+ *                         only for the Latin script, and a non-Latin name is not a
+ *                         Latin brand spelled with accents, so the core does not
+ *                         transliterate or guess.
+ * - "mixed-script":       the display name mixes Latin and non-Latin letters — the
+ *                         homoglyph shape (e.g. a Cyrillic "а" inside "pаypal").
+ *                         Folding such a name to a Latin brand token would *create*
+ *                         a brand match the raw text never had, so the core refuses
+ *                         to infer a brand from mixed-script text. The non-ASCII
+ *                         codepoints still surface via DisplayNameMetrics.hasNonAscii
+ *                         and the lexical metrics; brand inference simply stays out.
+ * - "insufficient-signal": the normalized token is too short or too non-alphabetic
+ *                         to read as a brand (see brandLike), so any catalog match
+ *                         would be coincidental.
+ * - "missing-from-domain": the From header yielded no domain to compare an inferred
+ *                         brand against, so no brand/From mismatch can be stated.
+ * - "empty-catalog":      a brand catalog was requested but is empty, so there is
+ *                         nothing to match against.
+ */
+export type BrandInferenceNotApplicableReason =
+  | "no-display-name"
+  | "non-latin-script"
+  | "mixed-script"
+  | "insufficient-signal"
+  | "missing-from-domain"
+  | "empty-catalog";
+
+/**
+ * The catalog brand a normalized display name best matched, with the similarity
+ * scores that justified the match (see DisplayNameBrandInference.match). Present
+ * only on a *confident* match — an exact token equality, or a high Jaro-Winkler
+ * score corroborated by a Jaccard score (both thresholds documented on
+ * computeDisplayNameBrandInference). A weak/coincidental best candidate yields no
+ * match rather than a low-confidence one.
+ *
+ * - brand:       the matched catalog entry's brand token.
+ * - domains:     that entry's registrable domains (the inferred legitimate
+ *                sending domains for the brand).
+ * - exact:       whether the display-name token equalled the brand token exactly
+ *                after normalization (similarity 1).
+ * - jaroWinkler: Jaro-Winkler similarity of the token and the brand, in [0, 1].
+ * - jaccard:     bigram Jaccard similarity of the token and the brand, in [0, 1].
+ * - similarity:  the headline score — 1 on an exact match, else the greater of
+ *                jaroWinkler and jaccard.
+ */
+export type BrandMatch = {
+  brand: string;
+  domains: string[];
+  exact: boolean;
+  jaroWinkler: number;
+  jaccard: number;
+  similarity: number;
+};
+
+/**
+ * Display-name brand inference: whether the From display name reads as a known
+ * brand, and if so whether the From domain is actually one that brand sends from.
+ *
+ * This is the reusable port of the Thunderbird add-on's display-name brand /
+ * domain-mismatch detection. It is computed only when the caller supplies a brand
+ * catalog (MetricsDependencies.brandCatalog) — the core bundles no brand list — so
+ * SenderIdentityMetrics.brandInference is *omitted entirely* when no catalog is
+ * provided rather than reported as an empty result. Like every field here it is a
+ * pure, serializable fact with no scoring or verdict; the caller owns thresholds
+ * and policy.
+ *
+ * The attacker pattern it captures: a spoofer sets the display name to a trusted
+ * brand ("PayPal", "HERMÈS", letter-spaced "P a y P a l") while sending from a
+ * domain that brand does not own. brandDomainMatchesFromDomain === false is that
+ * tell. The guardrails (see BrandInferenceNotApplicableReason) keep the inference
+ * from firing on non-Latin names, homoglyph mixed-script names, or signals too
+ * weak to be a brand, so it cannot be turned into a false accusation against a
+ * benign sender whose name merely resembles a brand fragment.
+ *
+ * - applicable:           whether a brand/From comparison was performed. false for
+ *                         every notApplicableReason; true when a catalog match was
+ *                         attempted (whether or not a confident match was found).
+ * - notApplicableReason:  why no comparison was performed, or null when applicable.
+ * - brandToken:           the normalized display-name token brand matching used —
+ *                         Latin diacritics folded, lower-cased, non-alphanumerics
+ *                         removed (so "HERMÈS" -> "hermes", "P a y P a l" ->
+ *                         "paypal"). null only when there was no display name.
+ *                         Always reported when a display name was present, even if
+ *                         the inference is not applicable, so a caller can see what
+ *                         was normalized.
+ * - diacriticsFolded:     whether Latin diacritic folding changed the display name
+ *                         (a #59 "HERMÈS" -> "HERMES" style fold occurred).
+ * - brandLike:            whether brandToken is shaped like a brand at all (long
+ *                         enough and mostly letters). A loose structural gate — a
+ *                         multi-word human name can read as brandLike — so it is
+ *                         the catalog match, not this flag, that establishes a
+ *                         brand; false drives the "insufficient-signal" reason.
+ * - match:                the confidently matched catalog brand, or null when no
+ *                         catalog entry matched confidently. See BrandMatch.
+ * - inferredBrandDomains: the matched brand's registrable domains (match.domains),
+ *                         or an empty array when there was no confident match — the
+ *                         "inferred brand domain candidate(s)" the display name
+ *                         points at.
+ * - fromRegistrableDomain: the From registrable domain used for the comparison
+ *                         (via the supplied/built-in PSL resolver), or null when it
+ *                         could not be resolved; the bare From domain is also
+ *                         compared so a From that is already registrable still
+ *                         matches.
+ * - brandDomainMatchesFromDomain: whether the From domain is one of the inferred
+ *                         brand's domains. true when From legitimately belongs to
+ *                         the matched brand; false on the impersonation shape
+ *                         (display name reads as the brand, From does not belong to
+ *                         it); null when there was no confident match, so a missing
+ *                         brand never reads as a mismatch.
+ */
+export type DisplayNameBrandInference = {
+  applicable: boolean;
+  notApplicableReason: BrandInferenceNotApplicableReason | null;
+  brandToken: string | null;
+  diacriticsFolded: boolean;
+  brandLike: boolean;
+  match: BrandMatch | null;
+  inferredBrandDomains: string[];
+  fromRegistrableDomain: string | null;
+  brandDomainMatchesFromDomain: boolean | null;
 };
 
 /**
@@ -468,6 +827,13 @@ export type DisplayNameSignals = {
  *                     "google", "microsoft"), or null when From belongs to no
  *                     catalog entry. Lets a caller group or display by provider
  *                     without re-deriving the catalog.
+ * - brandInference:   display-name brand / domain-mismatch inference (see
+ *                     DisplayNameBrandInference). Present **only** when the caller
+ *                     supplies a brand catalog via MetricsDependencies.brandCatalog;
+ *                     the field is omitted entirely otherwise, because the core
+ *                     bundles no brand list and brand inference is meaningless
+ *                     without caller data. An optional field rather than a null one
+ *                     so consumers that never opt in see no brand surface at all.
  */
 export type SenderIdentityMetrics = {
   displayName: DisplayNameMetrics;
@@ -479,6 +845,7 @@ export type SenderIdentityMetrics = {
   messageIdRegistrableDomainMatchesFromDomain: boolean | null;
   fromDomainIsPublicMailboxProvider: boolean;
   publicMailboxProviderId: string | null;
+  brandInference?: DisplayNameBrandInference;
 };
 
 /**
@@ -508,16 +875,17 @@ export type PublicMailboxProvider = {
  * Like Rules, these are *code, not data*, so they travel as a separate argument
  * to extractMetrics/analyzeMessage and never inside the JSON-serializable
  * AnalyzeInput — keeping the input contract serializable while still allowing a
- * caller to inject capabilities the core must not bundle.
+ * caller to override capabilities the core bundles.
  *
- * - getRegistrableDomain: maps a normalized domain to its registrable
- *   (organizational) domain — the label below the public suffix, e.g.
- *   "mail.corp.example.co.uk" -> "example.co.uk". Supplied by the caller because
- *   computing it correctly requires Public Suffix List data, which this package
- *   intentionally does not bundle (license boundary; see AGENTS.md / NOTICE).
- *   Return null when the domain has no registrable form or the caller cannot
- *   resolve it; the registrable-domain metrics then stay null rather than guessed.
+ * - getRegistrableDomain: overrides the built-in tldts-backed resolver that maps
+ *   a normalized domain to its registrable (organizational) domain — e.g.
+ *   "mail.corp.example.co.uk" -> "example.co.uk". The built-in resolver (see
+ *   `defaultGetRegistrableDomain`) runs by default and handles the common case;
+ *   supply a custom resolver to use a different PSL snapshot, private-registry
+ *   entries, or pinned data. Return null when the domain has no registrable form
+ *   or cannot be resolved; those registrable-domain fields then stay null.
  *   The resolver should return an already-normalized (lower-cased) domain.
+ *   To disable PSL resolution entirely, pass `getRegistrableDomain: () => null`.
  *
  * - publicMailboxProviders: overrides the built-in public mailbox provider
  *   catalog (defaultPublicMailboxProviders) used to populate
@@ -528,10 +896,21 @@ export type PublicMailboxProvider = {
  *   and so the override stays out of the serializable AnalyzeInput. Omitting it
  *   uses the built-in catalog. To extend rather than replace, spread the default:
  *   `[...defaultPublicMailboxProviders, { id: "acme", domains: ["acme.example"] }]`.
+ *
+ * - brandCatalog: a caller-supplied brand catalog (see BrandCatalogEntry) enabling
+ *   display-name brand inference (SenderIdentityMetrics.brandInference). Unlike
+ *   publicMailboxProviders there is **no built-in default** — brand/top-domain
+ *   lists are external data this package deliberately does not bundle (see
+ *   AGENTS.md / NOTICE) — so brand inference runs only when this is supplied, and
+ *   SenderIdentityMetrics.brandInference is omitted when it is not. Travels here as
+ *   data, kept out of the serializable AnalyzeInput like the rest of
+ *   MetricsDependencies. An empty array opts in but matches nothing (the inference
+ *   reports an "empty-catalog" not-applicable reason).
  */
 export type MetricsDependencies = {
   getRegistrableDomain?: (domain: string) => string | null;
   publicMailboxProviders?: readonly PublicMailboxProvider[];
+  brandCatalog?: readonly BrandCatalogEntry[];
 };
 
 /**
@@ -540,6 +919,29 @@ export type MetricsDependencies = {
  */
 export type MessageMetrics = {
   fromDomain: string | null;
+  /**
+   * The normalized domain of the RFC 5322 `Sender` mailbox — the agent that
+   * submitted the message when it differs from the author (`From`) — or null when
+   * `Sender` is absent or yields no real dotted domain. Parsed with the same
+   * hardened mailbox extractor as `From` (first instance, angle-addr preferred,
+   * comments stripped) so it never reaches into a quoted display name.
+   */
+  senderDomain: string | null;
+  /**
+   * Whether senderDomain exactly matches fromDomain. null when no comparison was
+   * possible (missing From, or no Sender domain), so a missing `Sender` — the
+   * common case where the author is also the submitter — never reads as a
+   * mismatch. false when the domains differ.
+   */
+  senderDomainMatchesFromDomain: boolean | null;
+  /**
+   * Whether senderDomain and fromDomain share a registrable (organizational)
+   * domain under the PSL resolver — the complement to the exact match above. null
+   * when either domain is absent or has no registrable form; otherwise true/false.
+   * Lets a caller treat a submitter on an organizational subdomain as same-org
+   * where the exact comparison reads as a mismatch.
+   */
+  senderDomainRegistrableMatchesFromDomain: boolean | null;
   messageIdDomain: string | null;
   messageIdDomainMatchesFromDomain: boolean | null;
   /**
@@ -554,6 +956,17 @@ export type MessageMetrics = {
    * Reply-To never reads as a mismatch. false when any Reply-To domain differs.
    */
   replyToDomainMatchesFromDomain: boolean | null;
+  /**
+   * Whether every Reply-To domain shares a registrable (organizational) domain
+   * with fromDomain under the PSL resolver — the complement to
+   * replyToDomainMatchesFromDomain. null when no comparison was possible (missing
+   * From, no Reply-To domain, or any Reply-To/From domain with no registrable
+   * form, so an unresolvable domain stays silent rather than guessing); false when
+   * any Reply-To domain belongs to a different organization. Lets a caller treat a
+   * support/list subdomain of the same organization as aligned where the exact
+   * comparison reads as a mismatch.
+   */
+  replyToDomainRegistrableMatchesFromDomain: boolean | null;
   /**
    * The normalized domain of the Return-Path (envelope reverse-path), or null
    * when Return-Path is absent, a null reverse-path (`<>`), or yields no real
@@ -573,6 +986,15 @@ export type MessageMetrics = {
    * Return-Path never reads as a mismatch. false when the domains differ.
    */
   returnPathDomainMatchesFromDomain: boolean | null;
+  /**
+   * Whether returnPathDomain and fromDomain share a registrable (organizational)
+   * domain under the PSL resolver — the complement to
+   * returnPathDomainMatchesFromDomain. null when either domain is absent or has no
+   * registrable form; otherwise true/false. Lets a caller treat an ESP/VERP bounce
+   * subdomain of the same organization as aligned where the exact comparison reads
+   * as a mismatch.
+   */
+  returnPathDomainRegistrableMatchesFromDomain: boolean | null;
   /**
    * Every resolvable, normalized domain parsed from an SPF `smtp.mailfrom`
    * property across all Authentication-Results headers, in encounter order and

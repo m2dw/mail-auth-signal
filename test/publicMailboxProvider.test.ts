@@ -90,23 +90,24 @@ describe("senderIdentity — public mailbox provider membership", () => {
     expect(senderIdentity.publicMailboxProviderId).toBeNull();
   });
 
-  it("matches via the registrable domain when a PSL resolver is supplied", () => {
-    // Without a resolver a provider subdomain does not match (no PSL logic).
-    const noResolver = extractMetrics({
+  it("matches via the registrable domain using the built-in PSL resolver by default", () => {
+    // The built-in resolver reduces mail.gmail.com -> gmail.com, matching "google".
+    const defaultResult = extractMetrics({
       headers: { from: "User <user@mail.gmail.com>" },
     });
-    expect(noResolver.senderIdentity.fromDomainIsPublicMailboxProvider).toBe(false);
+    expect(defaultResult.senderIdentity.fromDomainIsPublicMailboxProvider).toBe(true);
+    expect(defaultResult.senderIdentity.publicMailboxProviderId).toBe("google");
 
-    // With a resolver reducing mail.gmail.com -> gmail.com, it matches "google".
+    // A custom resolver can override the built-in.
     const deps: MetricsDependencies = {
-      getRegistrableDomain: (domain) => (domain.endsWith("gmail.com") ? "gmail.com" : null),
+      getRegistrableDomain: (_domain) => "unrelated.example",
     };
-    const withResolver = extractMetrics(
+    const withCustomResolver = extractMetrics(
       { headers: { from: "User <user@mail.gmail.com>" } },
       deps,
     );
-    expect(withResolver.senderIdentity.fromDomainIsPublicMailboxProvider).toBe(true);
-    expect(withResolver.senderIdentity.publicMailboxProviderId).toBe("google");
+    expect(withCustomResolver.senderIdentity.fromDomainIsPublicMailboxProvider).toBe(false);
+    expect(withCustomResolver.senderIdentity.publicMailboxProviderId).toBeNull();
   });
 
   it("honors a caller-overridden catalog via MetricsDependencies", () => {
@@ -192,6 +193,42 @@ describe("composite.publicMailboxSpoofingCandidate", () => {
       options: { trustedAuthservIds: [TRUSTED_ID] },
     });
     expect(signal).toBeUndefined();
+  });
+
+  it("does not flag relaxed-aligned public mailbox mail (subdomain signature, PSL-aware)", () => {
+    // From `outlook.com` signed by a trusted `dkim=pass header.d=mail.outlook.com`:
+    // exact alignment reads the subdomain signer as unaligned, but DMARC's relaxed
+    // (organizational) view authenticates the From, so the candidate must not fire.
+    const PSL: Record<string, string> = {
+      "outlook.com": "outlook.com",
+      "mail.outlook.com": "outlook.com",
+    };
+    const input: AnalyzeInput = {
+      headers: {
+        from: "Account <user@outlook.com>",
+        "message-id": "<id@outlook.com>",
+        "authentication-results": `${TRUSTED_ID}; dkim=pass header.d=mail.outlook.com`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const withResolver = analyzeMessage(
+      input,
+      defaultRules,
+      { getRegistrableDomain: (domain) => PSL[domain] ?? null },
+      defaultCompositeRules,
+    );
+    expect(withResolver.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(withResolver.metrics.authentication.organizational.anyAuthAligned).toBe(true);
+    expect(
+      withResolver.signals.find((s) => s.key === "composite.publicMailboxSpoofingCandidate"),
+    ).toBeUndefined();
+
+    // Without a resolver the subdomain signer is exact-unaligned, so the candidate
+    // does fire — confirming the suppression is resolver-driven, not unconditional.
+    const noResolver = analyzeMessage(input, defaultRules, undefined, defaultCompositeRules);
+    expect(
+      noResolver.signals.find((s) => s.key === "composite.publicMailboxSpoofingCandidate"),
+    ).toBeDefined();
   });
 
   it("has the expected stable rule identity", () => {

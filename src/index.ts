@@ -1,13 +1,26 @@
 export { analyzeMessage } from "./analyze.js";
+export { getRegistrableDomain as defaultGetRegistrableDomain } from "./psl.js";
 export { computeJaro, computeJaroWinkler } from "./jaroWinkler.js";
+export { computeJaccard } from "./jaccard.js";
+export {
+  BRAND_LIKE_MIN_LETTERS,
+  BRAND_LIKE_MIN_LETTER_RATIO,
+  BRAND_MATCH_MIN_JACCARD,
+  BRAND_MATCH_MIN_JARO_WINKLER,
+  computeDisplayNameBrandInference,
+  foldLatinDiacritics,
+  normalizeBrandToken,
+} from "./brandInference.js";
 export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
 export {
   computeDisplayNameWhitespace,
   computeDomainParts,
   computeLexicalHeuristics,
   computeLexicalStats,
+  computeRandomLookingCandidate,
   computeSenderIdentity,
 } from "./senderIdentity.js";
+export type { RandomLookingOptions } from "./senderIdentity.js";
 export {
   defaultPublicMailboxProviders,
   lookupPublicMailboxProvider,
@@ -15,6 +28,9 @@ export {
 export { normalizeHeaders } from "./normalizeHeaders.js";
 export { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 export {
+  allDomainsOrganizationallyAlign,
+  allRegistrableDomainsMatch,
+  domainsOrganizationallyAlign,
   extractDkimSigningDomain,
   extractDmarcHeaderFromDomain,
   extractDomainFromMailbox,
@@ -24,6 +40,8 @@ export {
   extractEnvelopeSenderDomain,
   isNullReversePath,
   parseFromMailbox,
+  registrableDomainOrSelf,
+  registrableDomainsMatch,
 } from "./domains.js";
 export {
   defaultRules,
@@ -38,6 +56,7 @@ export {
   dkimDomainMismatchRule,
   dmarcHeaderFromMismatchRule,
   envelopeSenderDisagreementRule,
+  displayNameBrandDomainMismatchRule,
 } from "./rules/index.js";
 export {
   defaultCompositeRules,
@@ -46,6 +65,12 @@ export {
   publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
   unsecuredDeepSubdomainCandidateRule,
+  deepRandomFromSubdomainRule,
+  brandDivergencePhishingRule,
+  ownDomainSpoofCandidateRule,
+  OWN_ACCOUNT_DOMAINS_CONTEXT_KEY,
+  dkimFailWithAlignedPassRule,
+  dkimAlignedLexicalMitigationRule,
   alignedAuthenticationConfirmedRule,
 } from "./rules/composite/index.js";
 export type {
@@ -53,16 +78,21 @@ export type {
   AnalyzeOptions,
   AnalyzeResult,
   AuthenticationAlignment,
+  BrandCatalogEntry,
+  BrandInferenceNotApplicableReason,
+  BrandMatch,
   CompositeRule,
   CompositeRuleContext,
   AuthenticationMethodResult,
   AuthenticationResultsHeader,
+  DisplayNameBrandInference,
   DisplayNameDerivedMetrics,
   DisplayNameMetrics,
   DisplayNameNormalization,
   DisplayNameSignals,
   DkimResult,
   DmarcResult,
+  DomainLabelMetrics,
   DomainParts,
   HeaderInput,
   HeaderLine,
@@ -70,6 +100,7 @@ export type {
   LexicalStats,
   MessageMetrics,
   MetricsDependencies,
+  OrganizationalAlignment,
   PublicMailboxProvider,
   SenderIdentityMetrics,
   SpfResult,

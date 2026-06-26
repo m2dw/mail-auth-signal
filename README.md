@@ -151,7 +151,7 @@ mismatch:
 | `trust` | An `Authentication-Results` header came from an untrusted authserv-id. | `auth.results.untrusted` |
 | `auth-failure` | An SPF/DKIM/DMARC method returned a failing or error result. | `auth.method.failure` |
 | `consistency` | Two domains that should agree do not. | `messageId.domainMismatch`, `replyTo.domainMismatch`, `returnPath.domainMismatch`, `smtpMailfrom.domainMismatch`, `dkim.domainMismatch`, `dmarc.headerFromMismatch`, `envelopeSender.domainDisagreement` |
-| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.publicMailboxSpoofingCandidate`, `composite.authenticatedDisplayNameSpoof`, `composite.unsecuredDeepSubdomainCandidate`, `composite.alignedAuthenticationConfirmed` |
+| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.publicMailboxSpoofingCandidate`, `composite.authenticatedDisplayNameSpoof`, `composite.unsecuredDeepSubdomainCandidate`, `composite.deepRandomFromSubdomain`, `composite.brandDivergencePhishing`, `composite.ownDomainSpoofCandidate`, `composite.dkimFailWithAlignedPass`, `composite.dkimAlignedLexicalMitigation`, `composite.alignedAuthenticationConfirmed` |
 
 Two conventions keep the surface coherent:
 
@@ -213,6 +213,12 @@ Missing context stays silent: a missing `From`, a missing `Message-ID`, or input
 Severity is **low**. When `Reply-To` carries several mailboxes, a single domain that differs from `From` is enough to flag (the `mismatchedDomains` subset is reported), since that lone divergent reply target is exactly the attacker pattern.
 
 Missing context stays silent: a missing `From`, a missing `Reply-To`, or mailboxes the parser cannot resolve to a dotted domain leaves `replyToDomainMatchesFromDomain` `null` and emits no signal.
+
+### Sender header consistency metric
+
+The RFC 5322 `Sender` header names the agent that actually submitted the message when it differs from the author (`From`) — e.g. a secretary, mailing-list, or automation account sending on behalf of a person. It is parsed with the same hardened mailbox extractor as `From` (first instance, angle-addr preferred over a quoted display name, RFC 5322 comments stripped), so a `Sender` whose display name embeds an address-shaped fragment cannot mask the real submitting domain.
+
+This is exposed as the `senderDomain` metric plus its `From` comparisons (`senderDomainMatchesFromDomain` exact, `senderDomainRegistrableMatchesFromDomain` registrable) — facts only, with **no bundled rule or signal**, since a divergent `Sender` is normal for delegated and on-behalf-of mail. A missing `Sender` (the common case where author and submitter are the same) leaves all three `null`, so it never reads as a mismatch.
 
 ### Envelope-sender consistency signals
 
@@ -288,6 +294,26 @@ single trusted+passing `header.from` that differs from From is enough to flag
 missing `From`, no trusted+passing DMARC result, or an unparseable `header.from`
 leaves `dmarcHeaderFromMatchesFromDomain` `null` and emits no signal.
 
+### Display name brand domain mismatch signal
+
+`displayNameBrandDomainMismatchRule` compares the brand a `From` **display name**
+reads as against the `From` domain, using the
+[brand-inference metric](#display-name-brand-inference).
+
+| Signal | Compares | Attacker pattern | Common false positive |
+|---|---|---|---|
+| `displayName.brandDomainMismatch` | Inferred display-name brand vs From domain | A trusted brand in the display name (`PayPal`, `HERMÈS`, letter-spaced `P a y P a l`) while sending from a domain that brand does not own — the reader sees the brand the client surfaces, not the real address. | A legitimate sender using a brand in its display name while sending from a partner/regional domain the caller's catalog does not list for that brand. |
+
+**Opt-in and gated.** This rule is silent unless a caller supplies a brand catalog
+(`MetricsDependencies.brandCatalog`) — the core bundles no brand list — so by
+default `brandInference` is absent and no signal is emitted. When opted in, it
+fires at **medium** severity only on a *confident* brand match (`brandDomainMatchesFromDomain
+=== false`): exact token equality, or high Jaro-Winkler corroborated by Jaccard, on
+a pure-Latin display name. Non-Latin names, mixed-script homoglyphs, weak matches,
+and a missing From domain all leave the fact `null` and emit nothing. The signal
+describes the sender's own message and never asserts anything about the
+impersonated brand's real infrastructure.
+
 ### Composite (Layer 4) signals
 
 The base rules above each read a single metric. A **composite rule** reads both
@@ -321,7 +347,12 @@ signals computed under the same `options`, exactly as `analyzeMessage` does).
 | `composite.unauthenticatedFromSpoof` | high | A trusted header evaluated the message, **no** aligned authentication vouches for the From domain (`anyAuthAligned === false`), **and** at least one base consistency signal disagrees with From. | Direct domain impersonation. Combines "From is unauthenticated" with "an identifier disagrees". Stays silent on unevaluable messages (no trusted header) and honest auth misconfigurations (no identifier mismatch). The only way to suppress it is to actually authenticate the From domain. |
 | `composite.publicMailboxSpoofingCandidate` | medium | The visible From is a known **public mailbox provider** domain (`senderIdentity.fromDomainIsPublicMailboxProvider === true`), a trusted header evaluated the message, and **no** aligned authentication vouches for it (`anyAuthAligned === false`, no aligned trusted DMARC pass). | Borrowing a consumer-mailbox brand (`From: someone@outlook.com`) while sending from other infrastructure — the logged From `outlook.com` / Return-Path `icloud.com` / Message-ID `yahoo.co.jp` shape. These providers publish enforcing DMARC, so genuine mail always aligns; missing alignment is the tell *on its own*, without needing a second divergent identifier. A *candidate*, so medium — a forwarder that breaks both SPF and DKIM lands here too. Cannot be suppressed without real aligned auth, nor manufactured against honest mail (only trusted, passing results count). |
 | `composite.authenticatedDisplayNameSpoof` | medium | The message authenticates and aligns for its From (`anyAuthAligned === true`) **and** the display name addresses a different domain (`displayName.containsEmail && embeddedDomainMatchesFromDomain === false`). | Authenticated lookalike with a borrowed display name (`From: "security@paypal.com" <alerts@authed.example>`) — the case a pure auth/Junk filter waves through. The signal points at the attacker's own message, never the impersonated brand. |
-| `composite.unsecuredDeepSubdomainCandidate` | low | The visible From sits on a deep subdomain (`fromDomainParts.subdomainDepth >= 2`, PSL-derived via a caller-supplied `getRegistrableDomain`), a trusted verifier reported `dmarc=none` for that From's organizational domain, and **no** aligned authentication vouches for it (`anyAuthAligned === false`, no aligned/org trusted SPF/DKIM or DMARC pass). | Disposable deep-subdomain impersonation (`From: …@sivakeso.support.sn5799.com`) — a readable, brand-ish hostname stacked under a cheap registrable domain with no enforced DMARC policy, where per-label randomness heuristics do not fire. Requires the resolver; without it `subdomainDepth` is `null` and the rule stays silent. Cannot be suppressed without real aligned auth for the visible From's organizational domain, nor manufactured against honest mail. |
+| `composite.unsecuredDeepSubdomainCandidate` | low | The visible From sits on a deep subdomain (`fromDomainParts.subdomainDepth >= 2`, PSL-derived), a trusted verifier reported `dmarc=none` for that From's organizational domain, and **no** aligned authentication vouches for it (`anyAuthAligned === false`, no aligned/org trusted SPF/DKIM or DMARC pass). | Disposable deep-subdomain impersonation (`From: …@sivakeso.support.sn5799.com`) — a readable, brand-ish hostname stacked under a cheap registrable domain with no enforced DMARC policy, where per-label randomness heuristics do not fire. `subdomainDepth` is populated by the built-in PSL resolver; pass `getRegistrableDomain: () => null` to disable. Cannot be suppressed without real aligned auth for the visible From's organizational domain, nor manufactured against honest mail. |
+| `composite.deepRandomFromSubdomain` | low | The visible From sits on a deep subdomain (`fromDomainParts.subdomainDepth >= 2`, PSL-derived), at least one **subdomain** label reads as random (`computeRandomLookingCandidate`), and **no** aligned authentication vouches for it. | Disposable *random* deep-subdomain impersonation (`From: …@a8f3qz.k2pls.cheapdomain.test`) — the random-label twin of `unsecuredDeepSubdomainCandidate`. Random labels and deep ESP structure are each individually noisy; the combination on the visible From with no aligned auth is the tell. Cannot be suppressed without real aligned auth for the From's organizational domain; needs a PSL resolver for the depth. |
+| `composite.brandDivergencePhishing` | high | The From display name reads as a known **brand** the From domain does not belong to (`senderIdentity.brandInference.brandDomainMatchesFromDomain === false`). Reports the From's authentication posture in `data.fromAuthenticated`. | Borrowed-brand phishing (`From: "PayPal" <security@evil.test>`), the Layer-4 elevation of the base `displayName.brandDomainMismatch`. Requires an opt-in `brandCatalog`; the core bundles no brand list. Describes the sender's own message, never the impersonated brand's infrastructure, so it cannot frame a third party. |
+| `composite.ownDomainSpoofCandidate` | high | The visible From is one of the caller's **own account domains** (supplied via `options.context.accountDomains`) and **no** aligned authentication vouches for it. | Self-domain spoofing (`From: it-helpdesk@yourcompany.example`) impersonating an internal colleague/system. Mail genuinely from your own domain authenticates, so an unauthenticated own-domain From is a sharp tell on its own. Opt-in via caller context; cannot be suppressed without real aligned auth for the own domain. |
+| `composite.dkimFailWithAlignedPass` | info | A trusted `dkim=fail` co-occurs with an aligned, trusted, passing DKIM signature for the From (`anyAlignedDkimPass === true`). | **Mitigation.** A benign broken/extra signature (e.g. a list/forwarder signature failing alongside the author domain's valid one), so the DKIM failure is not an authentication gap. Gates on a *real* aligned DKIM pass only the From domain can produce, so it cannot mark a forged failure benign. |
+| `composite.dkimAlignedLexicalMitigation` | info | The From local part or domain reads as random (`computeRandomLookingCandidate`) **but** an aligned, trusted, passing DKIM signature vouches for the From (`anyAlignedDkimPass === true`). | **Mitigation.** A positive counter-signal for "this random-looking identity is cryptographically the From domain" (`a8f3qz9k@example.com` with aligned DKIM), letting a caller avoid penalizing authenticated automated mail. Not attacker-triggerable — only the real From domain can produce the aligned signature. |
 | `composite.alignedAuthenticationConfirmed` | info | A trusted header gives aligned, passing authentication for the From **and** there is no base `auth-failure` or `consistency` signal and no misleading display name. | **False-positive mitigation.** The single positive marker a caller needs to confidently lower a score. It gates on *real* aligned authentication for the visible From — which a spoofer of another domain cannot produce — and withholds on any conflicting signal, so it cannot be used to launder a forgery. |
 
 `composite.alignedAuthenticationConfirmed` is the only rule in the package that
@@ -378,6 +409,38 @@ by a single aligned identifier — so a message with one aligned author-domain
 signature plus a third-party signer has `anyAlignedDkimPass = true` but
 `dkimAlignedWithFrom = false`.
 
+### Layer 2b — organizational (PSL-aware) alignment
+
+`authentication.organizational` (`OrganizationalAlignment`) is the same trusted +
+passing alignment view computed against **registrable (organizational) domains**
+rather than exact domains — the form of alignment DMARC actually evaluates under
+relaxed mode, and the practical default for deciding whether the From is backed by
+authentication. A `From` at `news.example.co.jp` counts as aligned with an
+authenticated `example.co.jp` (or `bounce.example.co.jp`) identifier, where the
+exact-domain flags above would read that subdomain difference as unaligned. The
+same trust + pass gating applies, so a forged or non-passing result can never make
+a spoof read as organizationally aligned.
+
+| Field | Meaning |
+|---|---|
+| `resolverAvailable` | Whether a registrable-domain resolver was supplied. `false` means these fields fell back to exact-domain comparison (no PSL applied). |
+| `spfAligned` | Whether every trusted, passing SPF `smtp.mailfrom` shares a registrable domain with From. `null` when none to compare. |
+| `dkimAligned` | Whether every trusted, passing DKIM `header.d` shares a registrable domain with From. `null` when none to compare. |
+| `anySpfAligned` | At least one trusted, passing SPF result organizationally aligned with From (DMARC's relaxed SPF leg). |
+| `anyDkimAligned` | At least one trusted, passing DKIM signature organizationally aligned with From (DMARC's relaxed DKIM leg). |
+| `anyAuthAligned` | `anySpfAligned \|\| anyDkimAligned` — the organizational DMARC-style summary; prefer this over the exact-domain `anyAuthAligned`. |
+| `unalignedPassingSpfDomains` / `unalignedPassingDkimDomains` | The trusted, passing SPF/DKIM domains that do **not** share a registrable domain with From (deduplicated). Surfaces "authenticated, but for another organization". |
+
+Computing the registrable boundary correctly (e.g. `co.jp` vs `com`) needs Public
+Suffix List data, which this package intentionally does not bundle (license
+boundary; see `NOTICE` / `AGENTS.md`). The boundary is taken from the
+caller-supplied `MetricsDependencies.getRegistrableDomain` resolver, threaded
+through `analyzeMessage` / `extractMetrics` / `runRules` / `runCompositeRules`.
+When no resolver is supplied these fields degrade cleanly to exact-domain
+comparison (a domain is its own organizational domain) and `resolverAvailable` is
+`false`, so they stay populated and usable — just no broader than the exact-domain
+flags. The exact-domain flags remain available alongside the organizational view.
+
 ## Sender-identity metrics
 
 `MessageMetrics.senderIdentity` (`SenderIdentityMetrics`) is a serializable view
@@ -394,6 +457,7 @@ verdict** — it exposes facts a caller can combine with its own thresholds.
 | `messageIdRegistrableDomainMatchesFromDomain` | Whether Message-ID and From share a registrable domain. Requires a resolver (see below); `null` otherwise. |
 | `fromDomainIsPublicMailboxProvider` | Whether the From domain is a known public mailbox provider (gmail.com, outlook.com, …) from the built-in catalog. `false` when absent or not in the catalog (see below). |
 | `publicMailboxProviderId` | The matched provider's stable catalog id (`"google"`, `"microsoft"`, …), or `null`. |
+| `brandInference` | Display-name brand / domain-mismatch inference (see below). **Present only** when a caller-supplied brand catalog is provided via `MetricsDependencies.brandCatalog`; omitted entirely otherwise. |
 
 `displayName` (`DisplayNameMetrics`) reports `present`, the unquoted `text`, its
 codepoint `length`, `hasNonAscii`, and — the attacker-relevant part — whether the
@@ -421,37 +485,76 @@ or one carrying an initial (`John A Smith`, `J P Morgan`) is **not** flagged. As
 always, this is a signal, not a verdict — the core assigns no score.
 
 `fromDomainParts` / `messageIdDomainParts` (`DomainParts`) split a domain into its
-dot-separated `labels` (with `labelCount` and `topLabel`). These need no external
-data. The `registrableDomain` and `subdomainDepth` fields, and
-`messageIdRegistrableDomainMatchesFromDomain`, are **only** populated when the
-caller supplies a registrable-domain resolver — see below.
+dot-separated `labels` (with `labelCount` and `topLabel`). The
+`registrableDomain`, `subdomainDepth`, and
+`messageIdRegistrableDomainMatchesFromDomain` fields are populated by the
+built-in PSL-backed resolver described below.
 
-### Registrable-domain metrics and the PSL boundary
+### Registrable-domain metrics and PSL resolver
 
 Deciding where the registrable (organizational) domain boundary falls — e.g.
-`example.co.uk` vs `example.com` — cannot be done correctly without
-[Public Suffix List](https://publicsuffix.org/) data. **This package bundles no
-PSL, brand list, or word list** (see `AGENTS.md` / `NOTICE`), so it never guesses
-that boundary. Instead the caller may inject a resolver as a non-serializable
-dependency — kept out of the JSON-serializable `AnalyzeInput`, exactly like
-`Rule`s:
+`example.co.uk` vs `example.com` — requires
+[Public Suffix List](https://publicsuffix.org/) data. This package bundles
+[tldts](https://github.com/remusao/tldts) as a runtime dependency and uses it
+by default, so registrable-domain metrics are populated without any caller setup:
+
+```ts
+import { analyzeMessage } from "mail-auth-signal";
+
+const result = analyzeMessage(input);
+// PSL-backed metrics are populated by default:
+result.metrics.senderIdentity.fromDomainParts?.registrableDomain;
+result.metrics.senderIdentity.fromDomainParts?.subdomainDepth;
+result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain;
+```
+
+The built-in resolver uses ICANN public suffixes only (`allowPrivateDomains:
+false`), so private PSL entries like `s3.amazonaws.com` are not treated as
+additional suffixes. Unknown TLDs follow tldts's default fallback: the TLD
+itself acts as the public suffix.
+
+To use a different PSL snapshot, private-registry entries, or a pinned dataset,
+supply a custom resolver as a non-serializable dependency:
 
 ```ts
 import { analyzeMessage } from "mail-auth-signal";
 
 const result = analyzeMessage(input, undefined, {
-  // Supply your own PSL-backed lookup; the core bundles none.
   getRegistrableDomain: (domain) => myPsl.getDomain(domain) ?? null,
 });
-result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain;
 ```
 
-The resolver should return an already-normalized (lower-cased) registrable domain,
-or `null` when it cannot resolve one. Without it, the registrable-domain fields
-stay `null` and the label-based fields are still populated. This complements the
-exact-match consistency metrics: a caller with PSL data can treat an ESP subdomain
-(`mailer.example.com` vs `example.com`) as same-organization, where the exact
-`messageIdDomainMatchesFromDomain` reads as a mismatch.
+To opt out of PSL resolution entirely and keep the registrable-domain fields
+`null` (the behaviour before v0.5.0), pass an explicit no-op:
+
+```ts
+analyzeMessage(input, undefined, { getRegistrableDomain: () => null });
+```
+
+The resolver should return an already-normalized (lower-cased) registrable
+domain, or `null` when it cannot resolve one. These fields complement the
+exact-match consistency metrics: for example, `messageIdRegistrableDomainMatchesFromDomain`
+lets a caller treat an ESP subdomain (`mailer.example.com` vs `example.com`) as
+same-organization, where the exact `messageIdDomainMatchesFromDomain` reads as a
+mismatch.
+
+The same registrable complement is provided for every identity domain compared
+against `From`, each paired with its exact-match counterpart on `MessageMetrics`:
+
+| Exact match | Registrable-domain complement |
+|---|---|
+| `senderDomainMatchesFromDomain` | `senderDomainRegistrableMatchesFromDomain` |
+| `replyToDomainMatchesFromDomain` | `replyToDomainRegistrableMatchesFromDomain` |
+| `returnPathDomainMatchesFromDomain` | `returnPathDomainRegistrableMatchesFromDomain` |
+| `messageIdDomainMatchesFromDomain` | `senderIdentity.messageIdRegistrableDomainMatchesFromDomain` |
+
+Each registrable comparison is `null` when either side is absent or has no
+registrable form (and, for the Reply-To mailbox-list, when any member is
+unresolvable), so an unresolvable domain stays silent rather than guessing
+same-organization. The `registrableDomainsMatch` (single domain) and
+`allRegistrableDomainsMatch` (mailbox-list) helpers are exported so callers can
+run the same comparison over their own domains. License attribution for tldts and
+the Public Suffix List data is in `NOTICE`.
 
 ### Public mailbox provider catalog
 
@@ -467,9 +570,9 @@ list just to detect this class.
 `senderIdentity.fromDomainIsPublicMailboxProvider` and `publicMailboxProviderId`
 expose catalog membership of the From domain; the opt-in
 [`composite.publicMailboxSpoofingCandidate`](#composite-layer-4-signals)
-signal pairs that membership with missing alignment. Membership is matched against
-the From **registrable** domain when a `getRegistrableDomain` resolver is supplied
-(so `mail.gmail.com` still resolves), else the exact From domain.
+signal pairs that membership with missing alignment. Membership is matched against the From **registrable** domain via the built-in
+PSL resolver (so `mail.gmail.com` still resolves to `gmail.com`), or a custom
+resolver if supplied.
 
 The catalog is *bundled data the core owns* — deliberately small and hand-authored,
 not an imported PSL/brand list, so it crosses no external-data license boundary
@@ -498,6 +601,80 @@ Membership is a **fact, not a verdict** — a public-mailbox From is perfectly
 normal. The core forms no opinion; only the candidate composite combines it with
 authentication state, and even that stays an observation the caller weighs.
 
+### Display-name brand inference
+
+A common spoof sets the `From` display name to a trusted **brand** — `PayPal`,
+`HERMÈS`, or a letter-spaced `P a y P a l` — while sending from a domain that
+brand does not own. Mail clients surface the display name far more prominently
+than the address, so the reader sees the brand and trusts it.
+
+`computeDisplayNameBrandInference` (surfaced on `senderIdentity.brandInference`
+when opted in) folds Latin diacritics, normalizes the display name to a brand
+token, matches it against a **caller-supplied** brand catalog using exact,
+Jaro-Winkler, and Jaccard similarity, and reports whether the `From` domain
+actually belongs to the matched brand:
+
+```ts
+import { analyzeMessage } from "mail-auth-signal";
+import type { BrandCatalogEntry } from "mail-auth-signal";
+
+// Caller-owned data — the core bundles NO brand list (see "Data boundary" below).
+const brandCatalog: BrandCatalogEntry[] = [
+  { brand: "paypal", domains: ["paypal.com"] },
+  { brand: "hermes", domains: ["hermes.com"] },
+];
+
+const result = analyzeMessage(input, undefined, { brandCatalog });
+result.metrics.senderIdentity.brandInference;
+// e.g. for From: "HERMÈS" <noreply@evil.test> →
+// {
+//   applicable: true, notApplicableReason: null,
+//   brandToken: "hermes", diacriticsFolded: true, brandLike: true,
+//   match: { brand: "hermes", domains: ["hermes.com"], exact: true,
+//            jaroWinkler: 1, jaccard: 1, similarity: 1 },
+//   inferredBrandDomains: ["hermes.com"],
+//   fromRegistrableDomain: "evil.test",
+//   brandDomainMatchesFromDomain: false   // ← the impersonation tell
+// }
+```
+
+| Field | Meaning |
+|---|---|
+| `applicable` | Whether a brand/From comparison was performed. `false` for every guardrail below. |
+| `notApplicableReason` | Why no comparison ran, or `null` when applicable: `"no-display-name"`, `"non-latin-script"`, `"mixed-script"`, `"insufficient-signal"`, `"missing-from-domain"`, `"empty-catalog"`. |
+| `brandToken` | The normalized display-name token used (diacritics folded, lower-cased, non-alphanumerics stripped: `HERMÈS` → `hermes`, `P a y P a l` → `paypal`). `null` only when no display name. |
+| `diacriticsFolded` | Whether Latin diacritic folding changed the name (the #59 `HERMÈS` → `HERMES` fold). |
+| `brandLike` | Whether the token is shaped like a brand at all (long enough, mostly letters) — a loose structural gate; the catalog match establishes the brand. |
+| `match` | The confidently matched catalog brand with its similarity scores (`BrandMatch`), or `null` when nothing matched confidently. |
+| `inferredBrandDomains` | The matched brand's registrable domains, or `[]` when no confident match. |
+| `fromRegistrableDomain` | The From registrable domain used for the comparison, or `null` if unresolved. |
+| `brandDomainMatchesFromDomain` | `true` when From legitimately belongs to the matched brand, `false` on the impersonation shape, `null` when there was no confident match. |
+
+The opt-in [`displayName.brandDomainMismatch`](#display-name-brand-domain-mismatch-signal)
+rule turns `brandDomainMatchesFromDomain === false` into a `medium`-severity
+`consistency` signal.
+
+**Guardrails — homoglyph and script safety.** Brand inference operates **only**
+on a pure-Latin display name. A name whose letters are entirely non-Latin
+(`山本太郎`) reports `non-latin-script`, and a **mixed-script** name — the
+homoglyph shape, e.g. `pаypal` with a Cyrillic `а` — reports `mixed-script` and is
+**refused outright**, because folding it to a Latin token would *manufacture* a
+brand match the raw text never had. (The non-ASCII codepoints still surface via
+`displayName.hasNonAscii` and the lexical metrics.) A match also requires a
+confident similarity — exact token equality, or a high Jaro-Winkler score
+corroborated by Jaccard — so a name that merely resembles a brand fragment cannot
+be turned into a false accusation against a benign sender. Because the signal
+always points at the sender's *own* message, it cannot be used to frame a third
+party.
+
+**Data boundary.** The reusable inference logic is **library-owned**, but the
+brand catalog itself is **caller-supplied data** — brand/top-domain lists are
+exactly the external data this package keeps out (see `AGENTS.md` / `NOTICE`), so
+the core bundles none and `brandInference` is omitted entirely unless a catalog is
+passed. `BrandCatalogEntry` is a first-class typed API (`{ brand, domains }`), and
+`foldLatinDiacritics` / `normalizeBrandToken` / `computeDisplayNameBrandInference`
+are exported so a consumer never re-implements the normalization.
+
 ## Lexical heuristics
 
 `computeLexicalHeuristics(token)` (`LexicalHeuristics`) is a richer companion to
@@ -514,19 +691,75 @@ caller's hands.
 import { computeLexicalHeuristics } from "mail-auth-signal";
 
 computeLexicalHeuristics("x9z8q2w1");
-// { shannonEntropy, normalizedEntropy, vowelRatio, maxConsonantRun,
-//   maxRepeatedCharRun, uniqueCharRatio, letterDigitTransitions }
+// { shannonEntropy, normalizedEntropy, vowelRatio, digitRatio, hyphenRatio,
+//   maxHexRun, maxConsonantRun, maxRepeatedCharRun, uniqueCharRatio,
+//   letterDigitTransitions, alphaLength, vowelCount, vowelRatioAlphaOnly,
+//   hyphenCount, uniqueCharCount, letterDigitTransitionCount, hasLongHexLikeRun }
 ```
 
 | Field | Meaning |
 |---|---|
 | `shannonEntropy` | Shannon entropy in bits over the codepoint-frequency distribution. `0` for an empty or single-character token. Higher = a more uniform, less predictable character mix. |
 | `normalizedEntropy` | `shannonEntropy` divided by the maximum for this length (`log2(length)`), giving a length-independent `[0, 1]` value. `0` when `length < 2`. |
-| `vowelRatio` | ASCII vowels ÷ ASCII letters, `[0, 1]`. `0` when there are no ASCII letters. |
+| `vowelRatio` | ASCII vowels (excluding `y`) ÷ ASCII letters, `[0, 1]`. `0` when there are no ASCII letters. |
+| `digitRatio` | ASCII digits ÷ length, `[0, 1]`. `0` when empty. The length-normalized form of `LexicalStats.digitCount`. |
+| `hyphenRatio` | ASCII hyphens ÷ length, `[0, 1]`. `0` when empty. Heavy hyphenation is a common shape of padded look-alike labels. |
+| `maxHexRun` | Longest run of consecutive ASCII hex characters (`0-9a-fA-F`). A long run hints at a hash / GUID fragment rather than a word. `0` when empty. |
 | `maxConsonantRun` | Longest run of consecutive ASCII consonants. |
 | `maxRepeatedCharRun` | Longest run of the same codepoint repeated (`3` for `"aaab"`). `0` when empty, else ≥ 1. |
 | `uniqueCharRatio` | Distinct codepoints ÷ length, `[0, 1]`. `0` when empty. |
 | `letterDigitTransitions` | Adjacent pairs that switch between an ASCII letter and an ASCII digit, either direction (`2` for `"ab12ab"`). |
+| `alphaLength` | Number of ASCII letters — the denominator behind the alpha-only ratios. |
+| `vowelCount` | ASCII vowels counting `y` (`a e i o u y`, case-insensitive). The y-inclusive companion to `vowelRatio`'s numerator. |
+| `vowelRatioAlphaOnly` | `vowelCount` (y-inclusive) ÷ `alphaLength`, `[0, 1]`. `0` when there are no ASCII letters. |
+| `hyphenCount` | Raw count of ASCII hyphens behind `hyphenRatio` (mirrors `LexicalStats.hyphenCount`). |
+| `uniqueCharCount` | Raw count of distinct codepoints behind `uniqueCharRatio`. |
+| `letterDigitTransitionCount` | Like `letterDigitTransitions` but **symbol-skipping**: counts a letter↔digit change across intervening separators, so `"ab-12"` counts `1`. |
+| `hasLongHexLikeRun` | Whether a run of ≥ 6 consecutive hex characters **contains a digit** — the hash/GUID-fragment shape (the add-on floor; a short fragment like `"abc12"` stays `false`). Stricter than `maxHexRun`: a real word like `"deadbeef"` makes `maxHexRun` `8` but `hasLongHexLikeRun` `false`. |
+
+### Random-looking token candidate
+
+`computeRandomLookingCandidate(token, options?)` rolls the metrics above into a single
+boolean flag, ported from the add-on's random-looking local-part / domain-label checks
+so a downstream add-on can retire its local copy. A token is a candidate when it is at
+least 6 codepoints long **and** matches any one machine-generated shape: a high digit
+ratio, frequent letter/digit alternation, a long hex run, a low vowel ratio paired with
+a long consonant run (e.g. `mpqxyt`), or the add-on's letters-only uppercase rule (an
+all-uppercase ASCII-letter token such as `CAQLEV`).
+
+```ts
+import { computeRandomLookingCandidate } from "mail-auth-signal";
+
+computeRandomLookingCandidate("x9z8q2w1");  // true  — alternation + digit ratio
+computeRandomLookingCandidate("deadbeef");  // true  — eight-char hex run
+computeRandomLookingCandidate("mpqxyt");    // true  — all-consonant, no vowels
+computeRandomLookingCandidate("CAQLEV");    // true  — letters-only uppercase
+computeRandomLookingCandidate("switchbot"); // false — pronounceable brand word
+computeRandomLookingCandidate("crowdworks");// false — short consonant run, no digits
+```
+
+The thresholds are deliberately tuned so known false-positive brand/word labels from
+the add-on's history (`switchbot`, `crowdworks`, and similar low-vowel but
+pronounceable words) read `false`, while spam-style random labels read `true`. Like
+every helper here it is a **candidate flag, not a verdict** — the caller decides
+whether a random-looking token matters in its context, since legitimate DKIM
+selectors, hashes, and ESP labels also look random.
+
+**One add-on-positive class needs a corpus.** A structurally word-like gibberish label
+such as `wlikqkgi` (vowel ratio `0.25`, longest consonant run `4`) is *indistinguishable
+by shape alone* from a real word such as `switchbot` (vowel ratio `0.22`, longest
+consonant run `4`): no codepoint-only threshold can flag one without the other.
+Separating them needs a language-frequency corpus, which this package deliberately does
+not bundle (the data/license boundary below). That class therefore stays **caller-owned**:
+pass a naturalness model via `options.isNatural` and an all-letter token the model rejects
+is also flagged, letting a caller holding its own bigram/trigram corpus reach full add-on
+parity. Omitting it keeps the helper purely structural, and such tokens read `false`.
+
+```ts
+const isNatural = (token: string) => myBigramModel.scoresAsWord(token);
+computeRandomLookingCandidate("wlikqkgi", { isNatural });  // true  — model rejects it
+computeRandomLookingCandidate("switchbot", { isNatural }); // false — model accepts it
+```
 
 **Use and limitations.** These are weak, policy-neutral hints, not verdicts — a
 high-entropy or vowel-poor token is only suspicious in a context the caller
@@ -540,10 +773,12 @@ cross-language ports compare exactly.
 
 **No bundled data.** Every value is computed from the token alone — no word list,
 brand dictionary, language corpus, or n-gram table. Bigram/trigram "naturalness"
-was considered and **deliberately omitted**: a meaningful naturalness score needs
-a language-frequency dataset, and bundling one would cross the data/license
-boundary this package keeps clear (see `AGENTS.md` / `NOTICE`). A caller with its
-own licensed corpus can layer that on top of these metrics.
+was considered and **deliberately left caller-owned**: a meaningful naturalness score
+needs a language-frequency dataset, and bundling one would cross the data/license
+boundary this package keeps clear (see `AGENTS.md` / `NOTICE`). It is the one Layer 3
+heuristic the library does not compute itself; instead `computeRandomLookingCandidate`
+accepts the caller's model through `options.isNatural` (above) so a caller with its own
+licensed corpus reaches full add-on parity without the library shipping the corpus.
 
 ## Jaro-Winkler string similarity
 
@@ -565,11 +800,20 @@ computeJaroWinkler("a", "b", 0);        // same as computeJaro (no prefix bonus)
 |---|---|
 | `computeJaro(a, b)` | Jaro similarity. Counts characters that match within a window of `⌊max(|a|, |b|) / 2⌋ − 1` positions and penalises transpositions. |
 | `computeJaroWinkler(a, b, p?)` | Extends Jaro with a prefix bonus: up to 4 shared leading characters increase the score by `p × prefixLength × (1 − jaro)`. Default `p = 0.1`; keep `p ≤ 0.25` to stay in `[0, 1]`. |
+| `computeJaccard(a, b)` | Bigram Jaccard similarity: `\|A ∩ B\| / \|A ∪ B\|` over each string's set of adjacent-codepoint bigrams. Rewards shared substrings irrespective of position (and is order-sensitive: `"abc"` vs `"cba"` scores `0`), complementing Jaro-Winkler's prefix weighting. |
+
+```ts
+import { computeJaccard } from "mail-auth-signal";
+
+computeJaccard("paypal", "paypai"); // shared "pa"/"ay"/"yp" bigrams
+```
 
 **Policy-neutral.** These helpers form no opinion on what similarity score is
-"suspicious" — that threshold belongs to the caller. Both functions are
+"suspicious" — that threshold belongs to the caller. All three functions are
 codepoint-based (a multi-byte Unicode character counts as one unit) and consult no
-external word list, brand dictionary, or corpus.
+external word list, brand dictionary, or corpus. The display-name
+[brand inference](#display-name-brand-inference) corroborates one with the other:
+a confident brand match needs a high Jaro-Winkler score **and** a Jaccard floor.
 
 ## CLI example — stdin scoring
 
@@ -630,20 +874,22 @@ network, or scoring policy):
 - DKIM signing-domain consistency (passing `header.d` vs From)
 - DMARC From-domain consistency (trusted, passing `header.from` vs the visible From)
 - Authentication & alignment metrics (`MessageMetrics.authentication`): Layer 1 raw SPF/DKIM/DMARC results and Layer 2 trusted+passing alignment/summary flags
-- Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and an optional registrable-domain comparison via a caller-supplied PSL resolver (no list bundled)
-- Richer lexical heuristics helper (`computeLexicalHeuristics`): entropy, normalized entropy, vowel ratio, max consonant/repeated runs, unique-character ratio, and letter/digit transitions — data-free and policy-neutral
-- **Jaro-Winkler string similarity** (`computeJaro`, `computeJaroWinkler`): data-free, policy-neutral similarity primitive (see [Jaro-Winkler string similarity](#jaro-winkler-string-similarity))
+- Sender-identity metrics (`MessageMetrics.senderIdentity`): display-name structure (including address-in-display-name detection), local-part/domain lexical profiles, domain label decomposition, and PSL-backed registrable-domain comparison (bundled via tldts; overridable)
+- Display-name brand inference (`senderIdentity.brandInference`, `computeDisplayNameBrandInference`): Latin diacritic folding, brand-token normalization (incl. letter-spacing camouflage), catalog matching via Jaro-Winkler + Jaccard, brand/domain-mismatch fact, and the opt-in `displayName.brandDomainMismatch` signal — library-owned logic over a **caller-supplied** brand catalog (the core bundles none; see [Display-name brand inference](#display-name-brand-inference))
+- Richer lexical heuristics helper (`computeLexicalHeuristics`): entropy, normalized entropy, vowel ratio, digit ratio, hyphen ratio, max hex/consonant/repeated runs, unique-character ratio, and letter/digit transitions — data-free and policy-neutral
+- Random-looking token candidate helper (`computeRandomLookingCandidate`): a single boolean folding the lexical heuristics into the add-on's random local-part / domain-label shape check, tuned against known brand/word false positives — data-free and policy-neutral
+- **Jaro-Winkler / Jaccard string similarity** (`computeJaro`, `computeJaroWinkler`, `computeJaccard`): data-free, policy-neutral similarity primitives (see [Jaro-Winkler string similarity](#jaro-winkler-string-similarity))
 - Composite (Layer 4) signals combining the base layers (opt-in)
 
 Add-on behavior that is intentionally **not** migrated — UI, notifications,
 mailbox/folder actions, storage, Thunderbird/WebExtension APIs, network/DNS, and
 the caller-owned policy modules `customFormulas.js`, `whitelist.js`, `scoring.js`,
-plus bundled PSL/brand/word-list data — stays caller-owned by the boundary in
+plus brand/word-list data — stays caller-owned by the boundary in
 [`AGENTS.md`](./AGENTS.md).
 
 Open items in the audit: one **license decision** — whether to ever bundle the
 language-frequency corpus that `bigramNaturalness.js` would require (*Needs
-decision*). The standing PSL/reference-data boundary remains caller-owned.
+decision*).
 
 ## License
 

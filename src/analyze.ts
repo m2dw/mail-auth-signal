@@ -21,10 +21,13 @@ import type {
  * inside the JSON-serializable AnalyzeInput. Callers may pass a narrowed or
  * extended rule set; omitting it uses defaultRules.
  *
- * Non-serializable runtime dependencies (e.g. a Public Suffix List resolver for
- * registrable-domain metrics) arrive as the optional third argument, also kept
- * out of the serializable AnalyzeInput. Omitting it leaves the resolver-dependent
- * metrics null.
+ * Non-serializable runtime dependencies (e.g. a custom Public Suffix List
+ * resolver) arrive as the optional third argument, also kept out of the
+ * serializable AnalyzeInput. Structural domain parts (fromDomainParts,
+ * messageIdDomainParts) use the built-in tldts resolver by default; equality
+ * comparisons (messageIdRegistrableDomainMatchesFromDomain) and provider
+ * subdomain lookup require an explicit `getRegistrableDomain` in deps. Pass
+ * `getRegistrableDomain: () => null` to opt out of PSL resolution entirely.
  *
  * Composite rules arrive as the optional fourth argument and default to none, so
  * the base output stays unchanged unless a caller opts in (e.g. by passing
@@ -44,9 +47,9 @@ export function analyzeMessage(
 ): AnalyzeResult {
   const options = input.options ?? {};
   const metrics = extractMetrics(input, deps);
-  const signals = runRules(metrics, options, rules);
+  const signals = runRules(metrics, options, rules, deps);
   if (compositeRules.length > 0) {
-    signals.push(...runCompositeRules(metrics, signals, options, compositeRules));
+    signals.push(...runCompositeRules(metrics, signals, options, compositeRules, deps));
   }
   return { metrics, signals };
 }

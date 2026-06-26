@@ -13,32 +13,90 @@
       "length": 19,
       "hasNonAscii": false,
       "containsEmail": true,
-      "embeddedDomains": ["paypal.com"],
+      "embeddedDomains": [
+        "paypal.com"
+      ],
       "embeddedDomainMatchesFromDomain": false,
-      "normalized": { "compactedWhitespace": "security@paypal.com" },
-      "metrics": { "whitespaceCompactedChanged": false },
-      "signals": { "spacedDisplayNameCamouflageCandidate": false }
+      "normalized": {
+        "compactedWhitespace": "security@paypal.com",
+        "latinFolded": "security@paypal.com"
+      },
+      "metrics": {
+        "whitespaceCompactedChanged": false,
+        "latinFoldedChanged": false
+      },
+      "signals": {
+        "spacedDisplayNameCamouflageCandidate": false,
+        "hasNonLatinScript": false,
+        "hasMixedScript": false
+      }
     },
     "localPart": "attacker",
-    "localPartLexical": { "length": 8, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
-    "fromDomainLexical": { "length": 9, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+    "localPartLexical": {
+      "length": 8,
+      "digitCount": 0,
+      "hyphenCount": 0,
+      "hasNonAscii": false
+    },
+    "fromDomainLexical": {
+      "length": 9,
+      "digitCount": 0,
+      "hyphenCount": 0,
+      "hasNonAscii": false
+    },
     "fromDomainParts": {
       "domain": "evil.test",
-      "labels": ["evil", "test"],
+      "labels": [
+        "evil",
+        "test"
+      ],
       "labelCount": 2,
       "topLabel": "test",
-      "registrableDomain": null,
-      "subdomainDepth": null
+      "registrableDomain": "evil.test",
+      "subdomainDepth": 0,
+      "labelMetrics": [
+        {
+          "label": "evil",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        },
+        {
+          "label": "test",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        }
+      ],
+      "hasConsecutiveHyphen": false,
+      "hasPunycodeLabel": false,
+      "hasConsecutiveHyphenOutsidePunycode": false
     },
     "messageIdDomainParts": {
       "domain": "evil.test",
-      "labels": ["evil", "test"],
+      "labels": [
+        "evil",
+        "test"
+      ],
       "labelCount": 2,
       "topLabel": "test",
-      "registrableDomain": null,
-      "subdomainDepth": null
+      "registrableDomain": "evil.test",
+      "subdomainDepth": 0,
+      "labelMetrics": [
+        {
+          "label": "evil",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        },
+        {
+          "label": "test",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        }
+      ],
+      "hasConsecutiveHyphen": false,
+      "hasPunycodeLabel": false,
+      "hasConsecutiveHyphenOutsidePunycode": false
     },
-    "messageIdRegistrableDomainMatchesFromDomain": null,
+    "messageIdRegistrableDomainMatchesFromDomain": true,
     "fromDomainIsPublicMailboxProvider": false,
     "publicMailboxProviderId": null
   }

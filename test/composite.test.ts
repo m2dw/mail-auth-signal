@@ -296,6 +296,45 @@ describe("composite.unauthenticatedFromSpoof", () => {
     ).toContain("composite.unauthenticatedFromSpoof");
   });
 
+  it("stays silent on a trusted aggregate DMARC pass for the From's organization (PSL-aware)", () => {
+    // The trusted verifier reports only an aggregate `dmarc=pass header.from=example.co.jp`
+    // for a visible From of `news.example.co.jp` — the relaxed-aligned subdomain case. The
+    // SPF/DKIM-derived organizational.anyAuthAligned cannot see the bare DMARC pass, but the
+    // verifier vouched DMARC passed for the same registrable domain, so with a resolver the
+    // composite must not escalate the benign Message-ID-host mismatch to a spoof.
+    const PSL: Record<string, string> = {
+      "example.co.jp": "example.co.jp",
+      "news.example.co.jp": "example.co.jp",
+    };
+    const input: AnalyzeInput = {
+      headers: {
+        from: "Example <notice@news.example.co.jp>",
+        "message-id": "<id@mailer.example.net>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=example.co.jp`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const withResolver = analyzeMessage(input, defaultRules, {
+      getRegistrableDomain: (domain) => PSL[domain] ?? null,
+    }, defaultCompositeRules);
+    expect(withResolver.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(withResolver.metrics.authentication.organizational.anyAuthAligned).toBe(false);
+    expect(withResolver.metrics.authentication.organizational.dmarcPassAligned).toBe(true);
+    expect(withResolver.signals.map((s) => s.key)).toContain("messageId.domainMismatch");
+    expect(
+      compositeSignals(withResolver.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+
+    // Without a resolver the organizational view degrades to exact comparison: the bare
+    // aggregate pass is for a different exact domain, so dmarcPassAligned is false and the
+    // composite still fires — confirming the suppression is resolver-driven, not unconditional.
+    const noResolver = analyzeMessage(input, defaultRules, undefined, defaultCompositeRules);
+    expect(noResolver.metrics.authentication.organizational.dmarcPassAligned).toBe(false);
+    expect(
+      compositeSignals(noResolver.signals).map((s) => s.key),
+    ).toContain("composite.unauthenticatedFromSpoof");
+  });
+
   it("omits forged untrusted-header signals from contributingSignals", () => {
     // An authoritative Message-ID mismatch triggers the composite. Alongside it, an
     // untrusted forged header injects `dkim=pass header.d=evil.test` (a forge-able
@@ -371,6 +410,52 @@ describe("composite.authenticatedDisplayNameSpoof", () => {
     expect(spoof?.severity).toBe("medium");
     expect(spoof?.data?.fromDomain).toBe("example.com");
     expect(spoof?.data?.mismatchedDomains).toEqual(["paypal.com"]);
+  });
+
+  it("fires on a relaxed-aligned subdomain From (DKIM header.d on the registrable domain, PSL-aware)", () => {
+    // From `news.example.co.jp` with a trusted `dkim=pass header.d=example.co.jp` is
+    // DMARC-relaxed authenticated for its organization, even though the exact-domain
+    // anyAuthAligned reads the subdomain difference as unaligned. The borrowed display
+    // name `security@paypal.com` must therefore still surface — the same message that
+    // the unauthenticatedFromSpoof composite already treats as authenticated must not
+    // slip past this authenticated display-name spoof.
+    const PSL: Record<string, string> = {
+      "example.co.jp": "example.co.jp",
+      "news.example.co.jp": "example.co.jp",
+    };
+    const input: AnalyzeInput = {
+      headers: {
+        from: '"security@paypal.com" <alerts@news.example.co.jp>',
+        "message-id": "<id@news.example.co.jp>",
+        "authentication-results": `${TRUSTED_ID}; dkim=pass header.d=example.co.jp`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const withResolver = analyzeMessage(input, defaultRules, {
+      getRegistrableDomain: (domain) => PSL[domain] ?? null,
+    }, defaultCompositeRules);
+    // Exact alignment reads the subdomain signature as unaligned; the organizational
+    // (relaxed) view recognizes it as authenticated.
+    expect(withResolver.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(withResolver.metrics.authentication.organizational.anyAuthAligned).toBe(true);
+    const spoof = compositeSignals(withResolver.signals).find(
+      (s) => s.key === "composite.authenticatedDisplayNameSpoof",
+    );
+    expect(spoof?.severity).toBe("medium");
+    expect(spoof?.data?.mismatchedDomains).toEqual(["paypal.com"]);
+    // The same authenticated message must not also read as an unauthenticated spoof.
+    expect(
+      compositeSignals(withResolver.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+
+    // Without a resolver the organizational view degrades to exact comparison, so the
+    // subdomain signature is unaligned and this gate stays shut — confirming the
+    // recognition is resolver-driven, not unconditional.
+    const noResolver = analyzeMessage(input, defaultRules, undefined, defaultCompositeRules);
+    expect(noResolver.metrics.authentication.organizational.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(noResolver.signals).map((s) => s.key),
+    ).not.toContain("composite.authenticatedDisplayNameSpoof");
   });
 
   it("does not treat a trusted DMARC pass for a different header.from as authenticating", () => {

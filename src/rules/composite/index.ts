@@ -2,20 +2,33 @@ import type {
   AnalyzeOptions,
   CompositeRule,
   MessageMetrics,
+  MetricsDependencies,
   Signal,
 } from "../../types.js";
-import { collectAuthenticationAlignment } from "../../metrics.js";
-import { resolveHeaderTrust } from "../trust.js";
+import { messageScopedMetrics } from "../index.js";
 import { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
 import { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 import { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
 import { unsecuredDeepSubdomainCandidateRule } from "./unsecuredDeepSubdomainCandidate.js";
+import { deepRandomFromSubdomainRule } from "./deepRandomFromSubdomain.js";
+import { brandDivergencePhishingRule } from "./brandDivergencePhishing.js";
+import { ownDomainSpoofCandidateRule } from "./ownDomainSpoofCandidate.js";
+import { dkimFailWithAlignedPassRule } from "./dkimFailWithAlignedPass.js";
+import { dkimAlignedLexicalMitigationRule } from "./dkimAlignedLexicalMitigation.js";
 import { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
 
 export { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
 export { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 export { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
 export { unsecuredDeepSubdomainCandidateRule } from "./unsecuredDeepSubdomainCandidate.js";
+export { deepRandomFromSubdomainRule } from "./deepRandomFromSubdomain.js";
+export { brandDivergencePhishingRule } from "./brandDivergencePhishing.js";
+export {
+  ownDomainSpoofCandidateRule,
+  OWN_ACCOUNT_DOMAINS_CONTEXT_KEY,
+} from "./ownDomainSpoofCandidate.js";
+export { dkimFailWithAlignedPassRule } from "./dkimFailWithAlignedPass.js";
+export { dkimAlignedLexicalMitigationRule } from "./dkimAlignedLexicalMitigation.js";
 export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
 
 /**
@@ -29,17 +42,23 @@ export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfi
  * explicit choice the consuming add-on makes.
  *
  * Order is stable but carries no policy meaning; composites are observations, not
- * a ranked verdict. The risk-observation composites (the two spoof shapes and the
- * unsecured deep-subdomain candidate) precede the benign affirmation so a reader
- * scanning the emitted signals sees risk observations before the "all clear",
- * though alignedAuthenticationConfirmedRule reads metrics (not the other
- * composites' output) so the ordering does not change any result.
+ * a ranked verdict. The risk-observation composites (the spoof shapes, the deep-
+ * subdomain candidates, the brand-divergence and own-domain candidates) precede the
+ * mitigations (the DKIM-aligned offsets) and the benign affirmation, so a reader
+ * scanning the emitted signals sees risk observations before the "all clear". Each
+ * composite reads metrics (and, where noted, the base signals), not the other
+ * composites' output, so the ordering does not change any result.
  */
 export const defaultCompositeRules: readonly CompositeRule[] = [
   unauthenticatedFromSpoofRule,
   publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
   unsecuredDeepSubdomainCandidateRule,
+  deepRandomFromSubdomainRule,
+  brandDivergencePhishingRule,
+  ownDomainSpoofCandidateRule,
+  dkimFailWithAlignedPassRule,
+  dkimAlignedLexicalMitigationRule,
   alignedAuthenticationConfirmedRule,
 ];
 
@@ -54,25 +73,30 @@ export const defaultCompositeRules: readonly CompositeRule[] = [
  * would let a composite read a forged header as authenticated; the contract is
  * the caller's to keep, mirroring runRules.
  *
- * The `authentication` projection is recomputed here from the current options'
- * trust (via collectAuthenticationAlignment + resolveHeaderTrust), identical to
- * how runRules builds its message-scoped view. This keeps a split-API caller —
- * extractMetrics without trust, then declare trustedAuthservIds at rule time —
- * seeing anyAuthAligned/dmarcPass consistent with the base signals it passes in,
- * rather than the trust baked into metrics.authentication at extraction.
+ * The `authentication` projection is rebuilt here from the current options'
+ * trust via messageScopedMetrics, identical to how runRules builds its
+ * message-scoped view. This keeps a split-API caller — extractMetrics without
+ * trust, then declare trustedAuthservIds at rule time — seeing
+ * anyAuthAligned/dmarcPass consistent with the base signals it passes in, rather
+ * than the trust baked into metrics.authentication at extraction.
+ *
+ * The optional `deps` carries the same PSL resolver analyzeMessage used, so the
+ * recomputed projection's organizational (PSL-aware) alignment matches the one
+ * extraction produced. Crucially, when a split-API caller passes neither a
+ * rule-time resolver nor a trust override, messageScopedMetrics preserves the
+ * already-extracted organizational block instead of downgrading it to the
+ * exact-domain fallback — so a composite rule reading
+ * authentication.organizational.anyAuthAligned still sees the resolver-derived
+ * value, matching runRules.
  */
 export function runCompositeRules(
   metrics: MessageMetrics,
   signals: readonly Signal[],
   options: AnalyzeOptions = {},
   rules: readonly CompositeRule[] = defaultCompositeRules,
+  deps?: MetricsDependencies,
 ): Signal[] {
-  const authentication = collectAuthenticationAlignment(
-    metrics.authenticationResults,
-    metrics.fromDomain,
-    (header) => resolveHeaderTrust(header, options),
-  );
-  const messageMetrics: MessageMetrics = { ...metrics, authentication };
+  const messageMetrics = messageScopedMetrics(metrics, options, deps);
 
   const composite: Signal[] = [];
   for (const rule of rules) {

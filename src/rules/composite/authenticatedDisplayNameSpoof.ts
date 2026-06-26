@@ -20,18 +20,23 @@ import type { CompositeRule, Signal } from "../../types.js";
  * deliberate spoof shape precisely when the message *also* passes authentication,
  * because that is when the misleading display name is paired with the false
  * comfort of a pass — the one case a pure Junk/auth filter would wave straight
- * through. Composing "anyAuthAligned === true" with "display name addresses a
- * different domain" isolates that case.
+ * through. Composing "the From is organizationally authenticated" with "display
+ * name addresses a different domain" isolates that case.
  *
  * Guards:
- *   - the From domain genuinely authenticated: either anyAuthAligned === true (an
- *     aligned, trusted, passing SPF/DKIM identifier backs the From) or a trusted
- *     verifier reported a DMARC pass for the visible From — even an aggregate
- *     `dmarc=pass header.from=From` with no SPF/DKIM method rows, which DMARC only
- *     emits when an aligned identifier satisfied the From's policy. This never
- *     piles onto an already-failing message (the unauthenticatedFromSpoof composite
- *     and the base auth/consistency signals cover those), and it matches how that
- *     composite already treats the aligned DMARC-only pass as authenticating the
+ *   - the From domain genuinely authenticated under DMARC's relaxed (PSL-aware)
+ *     view: organizational.anyAuthAligned (an aligned, trusted, passing SPF/DKIM
+ *     identifier on the From's registrable domain) or organizational.dmarcPassAligned
+ *     (a trusted DMARC pass for that organization — even a bare aggregate `dmarc=pass
+ *     header.from=<org>` with no SPF/DKIM method rows, which DMARC only emits when an
+ *     aligned identifier satisfied the From's policy). The organizational view is the
+ *     practical default and a strict superset of the exact-domain checks, degrading
+ *     to exact comparison with no resolver, so a relaxed-aligned subdomain (From
+ *     `news.example.co.jp`, DKIM `header.d=example.co.jp`) is recognized as
+ *     authenticated and its borrowed display name is not missed. This never piles
+ *     onto an already-failing message (the unauthenticatedFromSpoof composite and the
+ *     base auth/consistency signals cover those), and it matches how that composite
+ *     treats the same organizationally aligned authentication as authenticating the
  *     From.
  *   - displayName.containsEmail && embeddedDomainMatchesFromDomain === false: the
  *     display name contains an email-like address whose domain differs from the
@@ -50,26 +55,30 @@ export const authenticatedDisplayNameSpoofRule: CompositeRule = {
   description:
     "A message that authenticates for its From domain carries a display name addressing a different domain.",
   evaluate({ metrics }): Signal[] {
-    const { authentication, fromDomain } = metrics;
+    const { authentication } = metrics;
     // The From domain counts as authenticated when an aligned, trusted, passing
-    // SPF/DKIM identifier backs it (anyAuthAligned), or when a trusted verifier
-    // reports a DMARC pass for the *visible* From even though the same header omits
-    // the SPF/DKIM method lines anyAuthAligned is computed from (a bare
-    // `dmarc=pass header.from=From` aggregate leaves anyAuthAligned vacuously
-    // false). DMARC passes only when an aligned SPF or DKIM identifier satisfied the
-    // From domain's policy, so the aggregate likewise authenticates the From — this
-    // mirrors the suppression in the unauthenticatedFromSpoof composite. Only a pass
-    // whose header.from equals the visible From counts: a trusted pass for a
-    // different header.from is the dmarc.headerFromMismatch spoof tell, and an
-    // untrusted pass is forge-able.
-    const hasAlignedTrustedDmarcPass = authentication.dmarcResults.some(
-      (result) =>
-        result.trusted &&
-        result.result === "pass" &&
-        result.headerFrom !== null &&
-        result.headerFrom === fromDomain,
-    );
-    if (authentication.anyAuthAligned !== true && !hasAlignedTrustedDmarcPass) {
+    // SPF/DKIM identifier backs it, or when a trusted verifier reports a DMARC pass
+    // for the From. Use the PSL-aware (organizational) view as the practical default
+    // — the form of alignment DMARC actually evaluates under relaxed mode — so a
+    // DMARC-relaxed aligned subdomain is recognized as authenticated here too.
+    // Without it, From `news.example.co.jp` backed by a trusted `dkim=pass
+    // header.d=example.co.jp` (with a supplied resolver) reads as unauthenticated
+    // under the exact-domain anyAuthAligned, and this authenticated display-name
+    // spoof would be missed even though the unauthenticatedFromSpoof composite
+    // already treats that message as authenticated. Both organizational flags are
+    // strict supersets of their exact-domain counterparts: they vote only on
+    // trusted, passing identifiers and degrade to exact comparison when no resolver
+    // is supplied, so this never fires on genuinely unauthenticated mail.
+    // organizational.dmarcPassAligned additionally covers a bare `dmarc=pass
+    // header.from=<org>` aggregate that omits the SPF/DKIM method lines
+    // anyAuthAligned is computed from; only trusted, organizationally aligned passes
+    // count, so a pass for a different registrable domain (the
+    // dmarc.headerFromMismatch spoof tell) or an untrusted, forge-able pass does not
+    // authenticate the From.
+    if (
+      !authentication.organizational.anyAuthAligned &&
+      !authentication.organizational.dmarcPassAligned
+    ) {
       return [];
     }
 
