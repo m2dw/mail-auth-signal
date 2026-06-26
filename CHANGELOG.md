@@ -1,5 +1,173 @@
 # Changelog
 
+## Unreleased
+
+- Migrated further Layer 4 composite rule signals into the reusable core (issue #65),
+  extending `defaultCompositeRules` with five named, stable, opt-in signals. Each
+  emits structured data with severity hints only — no score deltas, thresholds, or
+  Review/Junk actions, which stay caller-owned:
+  - `composite.deepRandomFromSubdomain` (low): a deep From subdomain
+    (`subdomainDepth >= 2`) with at least one random-looking subdomain label and no
+    aligned authentication — the random-label twin of
+    `composite.unsecuredDeepSubdomainCandidate`.
+  - `composite.brandDivergencePhishing` (high): the Layer-4 elevation of the base
+    `displayName.brandDomainMismatch` (issue #64) — the From display name reads as a
+    catalog brand the From domain does not belong to, with the From's authentication
+    posture reported in `data.fromAuthenticated`. Opt-in via `brandCatalog`.
+  - `composite.ownDomainSpoofCandidate` (high): an unauthenticated From wearing one of
+    the caller's own account domains, supplied via
+    `options.context.accountDomains` (exported `OWN_ACCOUNT_DOMAINS_CONTEXT_KEY`).
+  - `composite.dkimFailWithAlignedPass` (info): a benign DKIM failure mitigated by an
+    aligned, trusted, passing DKIM signature for the From (a broken/extra signature).
+  - `composite.dkimAlignedLexicalMitigation` (info): a random-looking From identity
+    mitigated by an aligned DKIM signature — a positive counter-signal for
+    authenticated automated mail.
+  - The two mitigations gate on a *real* aligned DKIM pass that only the From domain
+    can produce, so neither is attacker-triggerable; the candidates require no aligned
+    authentication and cannot be suppressed without it. Documented in `README.md` and
+    covered by `test/compositeMigrated.test.ts` (a spam-like positive and a ham-like
+    guardrail for each). No change to base or pre-existing composite output.
+- Completed Layer 3 lexical and heuristic parity with the add-on (issue #66):
+  - Extended `computeLexicalHeuristics` / `LexicalHeuristics` with the remaining
+    add-on `lexicalMetrics.js` fields, all data-free and structural: `alphaLength`,
+    the y-inclusive `vowelCount` / `vowelRatioAlphaOnly`, the raw `hyphenCount` and
+    `uniqueCharCount` behind the existing ratios, a symbol-skipping
+    `letterDigitTransitionCount` (counts a letter↔digit change across separators,
+    so `"ab-12"` → `1`), and a digit-required `hasLongHexLikeRun` (a hex run of ≥ 4
+    that contains a digit — so `"deadbeef"` has `maxHexRun` 8 but
+    `hasLongHexLikeRun` false).
+  - Restored `computeRandomLookingCandidate` parity with the add-on's checks:
+    lowered the length floor from 8 to 6 so short all-consonant labels such as
+    `mpqxyt` flag, and added the add-on's letters-only uppercase rule so labels such
+    as `CAQLEV` flag. Known brand/word false positives (`switchbot`, `crowdworks`,
+    `github`, …) still read false.
+  - Resolved the bigram-naturalness data boundary (the `bigramNaturalness.js`
+    "Needs decision" item): the library bundles no language corpus, and
+    `computeRandomLookingCandidate(token, { isNatural })` now accepts a caller-
+    supplied naturalness model. This closes the one parity gap pure structure
+    cannot — a word-shaped gibberish label such as `wlikqkgi` is indistinguishable
+    by shape from a real word such as `switchbot`, so it is flagged only when the
+    caller injects its own corpus-backed model. Exported `RandomLookingOptions`.
+  - Updated `README.md` and `MIGRATION-AUDIT.md` to state what moved and what
+    intentionally remains caller-owned; expanded `test/lexicalHeuristics.test.ts`
+    and the hand-computed `test/fixtures/lexical-heuristics.json`. No change to the
+    pinned `analyzeMessage` / `senderIdentity` output (these stay exported helpers).
+- Migrated display-name brand inference into the reusable core (issue #64):
+  - Added `src/brandInference.ts` with `computeDisplayNameBrandInference`, plus the
+    exported helpers `foldLatinDiacritics` and `normalizeBrandToken` and the
+    documented threshold constants (`BRAND_LIKE_MIN_LETTERS`,
+    `BRAND_LIKE_MIN_LETTER_RATIO`, `BRAND_MATCH_MIN_JARO_WINKLER`,
+    `BRAND_MATCH_MIN_JACCARD`). The inference folds Latin diacritics (the #59
+    `HERMÈS` → `HERMES` fix, now a reusable helper), normalizes the display name to
+    a brand token (collapsing letter-spacing camouflage), and matches it against a
+    caller-supplied catalog using exact / Jaro-Winkler / Jaccard similarity.
+  - Added `src/jaccard.ts` with the pure, data-free `computeJaccard(a, b)` bigram
+    Jaccard similarity helper, exported from the public API to corroborate
+    Jaro-Winkler in brand matching.
+  - Added `SenderIdentityMetrics.brandInference` (`DisplayNameBrandInference`),
+    populated **only** when a caller supplies `MetricsDependencies.brandCatalog`
+    and omitted entirely otherwise, so existing serialized snapshots are
+    unaffected. New types: `BrandCatalogEntry`, `BrandMatch`,
+    `DisplayNameBrandInference`, `BrandInferenceNotApplicableReason`.
+  - Added the opt-in `displayNameBrandDomainMismatchRule`
+    (`displayName.brandDomainMismatch`, medium severity, `consistency` category) to
+    `defaultRules`, emitting a signal when the display name reads as a known brand
+    the From domain does not belong to.
+  - Guardrails report explicit not-applicable reasons for non-Latin,
+    **mixed-script homoglyph** (refused outright so folding cannot manufacture a
+    brand match), insufficient-signal, missing-From-domain, and empty-catalog
+    cases.
+  - **Data boundary:** the inference logic is library-owned but the brand catalog
+    stays **caller-supplied data** — the core bundles no brand/top-domain list (see
+    `AGENTS.md` / `NOTICE`), so no license documentation change was required. The
+    add-on can now remove or greatly shrink its local `displayNameMetrics.js` and
+    keep only its own `topDomains.js` data, passing it as `brandCatalog`.
+  - Added `test/brandInference.test.ts` covering HERMES/HERMÈS parity, an obvious
+    brand mismatch, a matching brand domain (incl. via the registrable domain),
+    letter-spacing camouflage, a Jaro-Winkler/Jaccard near-miss, non-Latin and
+    mixed-script/homoglyph guardrails, the remaining not-applicable reasons, and
+    `analyzeMessage` opt-in integration.
+  - Updated `README.md` (sender-identity table, new "Display-name brand inference"
+    and signal sections, Jaccard helper, migration status).
+- Made message identity extraction authoritative so the Thunderbird add-on can
+  stop owning local `messageIdentity.js` extraction/comparison facts (issue #63):
+  - Added RFC 5322 `Sender` header extraction. `MessageMetrics` now carries
+    `senderDomain`, `senderDomainMatchesFromDomain` (exact), and
+    `senderDomainRegistrableMatchesFromDomain` (PSL registrable). `Sender` is
+    parsed with the same hardened mailbox extractor as `From` (angle-addr
+    precedence, comment stripping); a missing `Sender` leaves all three `null`.
+  - Added registrable-domain complements to the exact From comparisons for the
+    Reply-To and Return-Path identity domains
+    (`replyToDomainRegistrableMatchesFromDomain`,
+    `returnPathDomainRegistrableMatchesFromDomain`), matching the existing
+    `senderIdentity.messageIdRegistrableDomainMatchesFromDomain`. All use the
+    built-in PSL resolver by default and report `null` when a side is absent or
+    unresolvable.
+  - Exported the `registrableDomainsMatch` (single domain) and
+    `allRegistrableDomainsMatch` (mailbox-list) helpers so callers can run the
+    same organizational comparison over their own domains.
+  - No new rule, signal, or scoring policy is introduced — these are pure,
+    serializable facts. `senderIdentity` and all existing signals are unchanged.
+  - Added `test/messageIdentity.test.ts` (Sender extraction, angle-bracket
+    precedence, missing domains, `.co.jp` registrable comparisons, helper unit
+    tests); extended the parity metric-key set and refreshed fixtures with the
+    new keys.
+  - Updated `README.md` and `MIGRATION-AUDIT.md`.
+- Moved PSL-aware authentication alignment into the core (issue #62):
+  - `AuthenticationAlignment` now carries an `organizational`
+    (`OrganizationalAlignment`) view alongside the existing exact-domain flags:
+    `resolverAvailable`, `spfAligned`, `dkimAligned`, `anySpfAligned`,
+    `anyDkimAligned`, `anyAuthAligned`, and the `unalignedPassingSpfDomains` /
+    `unalignedPassingDkimDomains` lists. It applies the same trusted + passing
+    gating as Layer 2 but compares **registrable (organizational) domains**, so a
+    From subdomain aligns with an authenticated organizational identifier — the
+    relaxed-mode alignment DMARC actually evaluates, and the practical default a
+    consumer should prefer over the exact-domain `anyAuthAligned`. The
+    exact-domain flags remain available unchanged.
+  - The registrable boundary comes from the caller-supplied
+    `MetricsDependencies.getRegistrableDomain` resolver (the core bundles no PSL
+    data; license boundary in `NOTICE` / `AGENTS.md`). The resolver is threaded
+    through `analyzeMessage`, `extractMetrics`, `runRules`, and
+    `runCompositeRules` (each gained an optional `deps` argument) so the
+    organizational view stays consistent across the split API. With no resolver
+    the fields degrade cleanly to exact-domain comparison and record
+    `resolverAvailable: false`.
+  - Added the data-free domain helpers `registrableDomainOrSelf`,
+    `domainsOrganizationallyAlign`, and `allDomainsOrganizationallyAlign`, and
+    exported the `OrganizationalAlignment` type.
+  - Added `test/organizationalAlignment.test.ts` covering compound suffixes such
+    as `.co.jp`, resolver-override behavior, cross-organization spoofs on a shared
+    suffix, the any-vs-all distinction, trust/pass gating, and resolver threading
+    through `analyzeMessage` / `runRules`. Updated the serializable fixtures to
+    pin the new `organizational` block.
+  - The package emits facts/signals only; score weights remain with the caller.
+
+## v0.5.0 — 2026-06-25
+
+- Bundled tldts as a runtime dependency and enabled PSL-backed registrable-domain
+  metrics by default (issue #61):
+  - `analyzeMessage(input)` now populates `registrableDomain`, `subdomainDepth`,
+    and `messageIdRegistrableDomainMatchesFromDomain` without any caller setup.
+    The built-in resolver uses ICANN public suffixes only (`allowPrivateDomains:
+    false`); unknown TLDs follow tldts's default fallback (TLD as public suffix).
+  - A caller-supplied `MetricsDependencies.getRegistrableDomain` still takes
+    precedence, enabling custom PSL snapshots or private-registry entries.
+  - To opt out of PSL resolution entirely (the pre-v0.5.0 behaviour), pass
+    `getRegistrableDomain: () => null`.
+  - The built-in resolver is exported as `defaultGetRegistrableDomain` for
+    callers that want to reference or extend it.
+  - Added `src/psl.ts` with the built-in resolver; no other core module changed
+    behavior.
+  - Updated `NOTICE` with tldts (MIT) and Public Suffix List (MPL 2.0) license
+    attribution.
+  - Updated `README.md`, `MIGRATION-AUDIT.md`, and `CHANGELOG.md` to reflect
+    that PSL support is now bundled and enabled by default.
+  - Added `test/psl.test.ts` covering: compound suffix (`.co.jp`), standard
+    subdomain depth, Message-ID/From registrable-domain comparison, and custom
+    resolver override.
+  - Updated existing fixtures and the `unsecuredDeepSubdomainCandidate` test to
+    reflect the new PSL-populated defaults.
+
 ## v0.4.0 — 2026-06-19
 
 - Ported Jaro-Winkler string-similarity helper into reusable core (issue #50):

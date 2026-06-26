@@ -13,7 +13,7 @@ import type { AnalyzeInput, MetricsDependencies, SenderIdentityMetrics } from ".
 import benign from "./fixtures/senderidentity-benign.json" with { type: "json" };
 import spoof from "./fixtures/senderidentity-display-name-spoof.json" with { type: "json" };
 
-/** A tiny stand-in Public Suffix List resolver; the core bundles none. */
+/** A tiny stand-in resolver used by some tests in place of the built-in tldts resolver. */
 const PSL: Record<string, string> = {
   "example.com": "example.com",
   "mailer.example.com": "example.com",
@@ -62,6 +62,14 @@ describe("computeDomainParts — labels always, registrable only with a resolver
       topLabel: "com",
       registrableDomain: null,
       subdomainDepth: null,
+      labelMetrics: [
+        { label: "mail", isPunycode: false, hasConsecutiveHyphen: false },
+        { label: "example", isPunycode: false, hasConsecutiveHyphen: false },
+        { label: "com", isPunycode: false, hasConsecutiveHyphen: false },
+      ],
+      hasConsecutiveHyphen: false,
+      hasPunycodeLabel: false,
+      hasConsecutiveHyphenOutsidePunycode: false,
     });
   });
 
@@ -73,6 +81,16 @@ describe("computeDomainParts — labels always, registrable only with a resolver
       topLabel: "uk",
       registrableDomain: "example.co.uk",
       subdomainDepth: 2,
+      labelMetrics: [
+        { label: "news", isPunycode: false, hasConsecutiveHyphen: false },
+        { label: "mail", isPunycode: false, hasConsecutiveHyphen: false },
+        { label: "example", isPunycode: false, hasConsecutiveHyphen: false },
+        { label: "co", isPunycode: false, hasConsecutiveHyphen: false },
+        { label: "uk", isPunycode: false, hasConsecutiveHyphen: false },
+      ],
+      hasConsecutiveHyphen: false,
+      hasPunycodeLabel: false,
+      hasConsecutiveHyphenOutsidePunycode: false,
     });
   });
 
@@ -212,15 +230,15 @@ describe("senderIdentity — lexical anomalies are reported, not judged", () => 
   });
 });
 
-describe("senderIdentity — registrable-domain comparison requires a resolver", () => {
+describe("senderIdentity — registrable-domain comparison uses built-in PSL by default", () => {
   const message = (messageId: string): AnalyzeInput => ({
     headers: { from: "Example Sender <notice@example.com>", "message-id": messageId },
   });
 
-  it("is null without a resolver even when an exact comparison is possible", () => {
+  it("is true by default when ESP subdomain and From share the same registrable domain", () => {
     const result = analyzeMessage(message("<x@mailer.example.com>"));
     expect(result.metrics.messageIdDomainMatchesFromDomain).toBe(false);
-    expect(result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain).toBeNull();
+    expect(result.metrics.senderIdentity.messageIdRegistrableDomainMatchesFromDomain).toBe(true);
   });
 
   it("treats an ESP subdomain as same-organization when a resolver is supplied", () => {
@@ -268,9 +286,13 @@ describe("displayName — whitespace-compacted brand-style normalization", () =>
   it("leaves a single-word display name unchanged and unflagged", () => {
     const result = computeDisplayNameWhitespace("Daiichi");
     expect(result).toEqual({
-      normalized: { compactedWhitespace: "Daiichi" },
-      metrics: { whitespaceCompactedChanged: false },
-      signals: { spacedDisplayNameCamouflageCandidate: false },
+      normalized: { compactedWhitespace: "Daiichi", latinFolded: "Daiichi" },
+      metrics: { whitespaceCompactedChanged: false, latinFoldedChanged: false },
+      signals: {
+        spacedDisplayNameCamouflageCandidate: false,
+        hasNonLatinScript: false,
+        hasMixedScript: false,
+      },
     });
   });
 
@@ -293,9 +315,13 @@ describe("displayName — whitespace-compacted brand-style normalization", () =>
 
   it("reports nulls/false for an absent display name", () => {
     expect(computeDisplayNameWhitespace(null)).toEqual({
-      normalized: { compactedWhitespace: null },
-      metrics: { whitespaceCompactedChanged: false },
-      signals: { spacedDisplayNameCamouflageCandidate: false },
+      normalized: { compactedWhitespace: null, latinFolded: null },
+      metrics: { whitespaceCompactedChanged: false, latinFoldedChanged: false },
+      signals: {
+        spacedDisplayNameCamouflageCandidate: false,
+        hasNonLatinScript: false,
+        hasMixedScript: false,
+      },
     });
   });
 
@@ -304,6 +330,141 @@ describe("displayName — whitespace-compacted brand-style normalization", () =>
     // single-letter count stays below the threshold and it is not flagged.
     const result = computeDisplayNameWhitespace("A & B Corp");
     expect(result.signals.spacedDisplayNameCamouflageCandidate).toBe(false);
+  });
+});
+
+describe("displayName — Latin diacritic folding for brand inference", () => {
+  it("folds HERMÈS to HERMES for Latin-only display name", () => {
+    const result = computeDisplayNameWhitespace("HERMÈS");
+    expect(result.normalized.latinFolded).toBe("HERMES");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("folds Hermès to Hermes", () => {
+    const result = computeDisplayNameWhitespace("Hermès");
+    expect(result.normalized.latinFolded).toBe("Hermes");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+  });
+
+  it("folds decomposed HERME\\u0300S (NFD form) the same as precomposed HERMÈS", () => {
+    // "HERMÈS" in NFD: combining grave accent ̀ has Script=Inherited,
+    // not Script=Latin, so the script-safety pass must skip combining marks.
+    const decomposed = "HERMÈS"; // È decomposed as E + combining grave
+    const result = computeDisplayNameWhitespace(decomposed);
+    expect(result.normalized.latinFolded).toBe("HERMES");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("folds decomposed Hermè\\u0300s (NFD form) the same as precomposed Hermès", () => {
+    const decomposed = "Hermès";
+    const result = computeDisplayNameWhitespace(decomposed);
+    expect(result.normalized.latinFolded).toBe("Hermes");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("folds .normalize(NFD) form of HERMES+grave — explicit decomposed path", () => {
+    // Construct the NFD form programmatically so the test is encoding-independent.
+    const decomposedUpper = "HERMÈS".normalize("NFD"); // HERMÈS → NFD
+    const result = computeDisplayNameWhitespace(decomposedUpper);
+    expect(result.normalized.latinFolded).toBe("HERMES");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("folds .normalize(NFD) form of Hermes+grave — explicit decomposed path", () => {
+    const decomposedLower = "Hermès".normalize("NFD"); // Hermès → NFD
+    const result = computeDisplayNameWhitespace(decomposedLower);
+    expect(result.normalized.latinFolded).toBe("Hermes");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("leaves plain ASCII brand names unchanged, with latinFolded equal to input", () => {
+    const result = computeDisplayNameWhitespace("HERMES");
+    expect(result.normalized.latinFolded).toBe("HERMES");
+    expect(result.metrics.latinFoldedChanged).toBe(false);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("sets latinFolded to null when display name contains Cyrillic characters", () => {
+    // Pure Cyrillic: Н is U+041D (Cyrillic Capital Letter En)
+    const result = computeDisplayNameWhitespace("НERMES");
+    expect(result.normalized.latinFolded).toBeNull();
+    expect(result.metrics.latinFoldedChanged).toBe(false);
+    expect(result.signals.hasNonLatinScript).toBe(true);
+  });
+
+  it("flags Cyrillic/Latin mix as hasMixedScript", () => {
+    // НERMES: Н is Cyrillic, ERMES is ASCII Latin → mixed script
+    const result = computeDisplayNameWhitespace("НERMES");
+    expect(result.signals.hasMixedScript).toBe(true);
+  });
+
+  it("sets latinFolded to null for CJK/Japanese display names", () => {
+    const result = computeDisplayNameWhitespace("日本語");
+    expect(result.normalized.latinFolded).toBeNull();
+    expect(result.signals.hasNonLatinScript).toBe(true);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("exposes HERMÈS via latinFolded in full senderIdentity metrics", () => {
+    const si = extractMetrics({
+      headers: { from: "HERMÈS <attacker@evil.test>" },
+    }).senderIdentity;
+    // Raw display name is preserved verbatim …
+    expect(si.displayName.text).toBe("HERMÈS");
+    // … and the folded form is available for brand inference.
+    expect(si.displayName.normalized.latinFolded).toBe("HERMES");
+    expect(si.displayName.metrics.latinFoldedChanged).toBe(true);
+    expect(si.displayName.signals.hasNonLatinScript).toBe(false);
+    expect(si.displayName.signals.hasMixedScript).toBe(false);
+  });
+
+  it("exposes Hermès via latinFolded in full senderIdentity metrics", () => {
+    const si = extractMetrics({
+      headers: { from: "Hermès <attacker@evil.test>" },
+    }).senderIdentity;
+    expect(si.displayName.text).toBe("Hermès");
+    expect(si.displayName.normalized.latinFolded).toBe("Hermes");
+    expect(si.displayName.metrics.latinFoldedChanged).toBe(true);
+  });
+
+  it("does not fold a Cyrillic homoglyph name — hasMixedScript flags it instead", () => {
+    const si = extractMetrics({
+      headers: { from: "НERMES <attacker@evil.test>" },
+    }).senderIdentity;
+    expect(si.displayName.normalized.latinFolded).toBeNull();
+    expect(si.displayName.signals.hasNonLatinScript).toBe(true);
+    expect(si.displayName.signals.hasMixedScript).toBe(true);
+  });
+
+  it("treats trademark symbol (™) as script-neutral and still folds diacritics", () => {
+    // ™ is U+2122, Script=Common — must not suppress latinFolded
+    const result = computeDisplayNameWhitespace("HERMÈS™");
+    expect(result.normalized.latinFolded).toBe("HERMES™");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
+  });
+
+  it("treats curly apostrophe (Script=Common) as script-neutral and still folds diacritics", () => {
+    // U+2019 RIGHT SINGLE QUOTATION MARK is Script=Common — must not suppress latinFolded
+    // "L’Oréal" = L + RIGHT SINGLE QUOTATION MARK + O + r + é + a + l
+    const input = "L’Oréal";
+    const result = computeDisplayNameWhitespace(input);
+    expect(result.normalized.latinFolded).toBe("L’Oreal");
+    expect(result.metrics.latinFoldedChanged).toBe(true);
+    expect(result.signals.hasNonLatinScript).toBe(false);
+    expect(result.signals.hasMixedScript).toBe(false);
   });
 });
 

@@ -186,6 +186,93 @@ export function domainsExactlyMatch(left: string | null, right: string | null): 
 }
 
 /**
+ * Whether two domains share a registrable (organizational) domain under the given
+ * PSL-backed resolver — the complement to domainsExactlyMatch.
+ *
+ * This is the comparison that recognizes an ESP/sending subdomain as the same
+ * organization (`mailer.example.com` vs `example.com` both resolve to
+ * `example.com`) where the exact comparison reads as a mismatch, and that draws an
+ * organizational boundary the label count cannot (`example.co.jp` vs
+ * `evil.co.jp`).
+ *
+ * Returns null — "no comparison was possible" — when either domain is absent or
+ * the resolver cannot derive a registrable form for either, so a missing or
+ * unresolvable domain stays silent rather than producing a noisy verdict (mirroring
+ * the exact comparators and the existing Message-ID registrable metric). Otherwise
+ * returns whether the two registrable domains are equal.
+ */
+export function registrableDomainsMatch(
+  left: string | null,
+  right: string | null,
+  getRegistrableDomain: (domain: string) => string | null,
+): boolean | null {
+  if (!left || !right) return null;
+  const leftRegistrable = getRegistrableDomain(left);
+  const rightRegistrable = getRegistrableDomain(right);
+  if (!leftRegistrable || !rightRegistrable) return null;
+  return leftRegistrable === rightRegistrable;
+}
+
+/**
+ * Resolve a domain to its registrable (organizational) domain via the supplied
+ * resolver, falling back to the domain itself when no resolver is supplied or the
+ * resolver cannot classify it.
+ *
+ * The fallback is what lets the PSL-aware alignment metrics degrade cleanly to
+ * exact-domain comparison when a caller supplies no Public Suffix List resolver
+ * (this package bundles none; see AGENTS.md / NOTICE): without PSL data the best
+ * organizational view of a domain is the domain itself, so a subdomain only
+ * "aligns" when it is byte-for-byte equal. With a resolver, `news.example.co.jp`
+ * and `bounce.example.co.jp` both resolve to `example.co.jp` and therefore align.
+ */
+export function registrableDomainOrSelf(
+  domain: string,
+  getRegistrableDomain?: (domain: string) => string | null,
+): string {
+  if (!getRegistrableDomain) return domain;
+  return getRegistrableDomain(domain) ?? domain;
+}
+
+/**
+ * Whether two domains share an organizational (registrable) domain — PSL-aware
+ * alignment, the form DMARC evaluates under relaxed mode. With a resolver,
+ * `news.example.co.jp` aligns with `example.co.jp`; without one this reduces to
+ * exact equality (see registrableDomainOrSelf). Returns null when either side is
+ * absent, mirroring domainsExactlyMatch, so missing context yields no verdict.
+ */
+export function domainsOrganizationallyAlign(
+  left: string | null,
+  right: string | null,
+  getRegistrableDomain?: (domain: string) => string | null,
+): boolean | null {
+  if (!left || !right) return null;
+  return (
+    registrableDomainOrSelf(left, getRegistrableDomain) ===
+    registrableDomainOrSelf(right, getRegistrableDomain)
+  );
+}
+
+/**
+ * The organizational analogue of allDomainsMatch: whether every domain in
+ * `domains` shares a registrable domain with `reference`. Returns null when no
+ * comparison was possible (absent reference or empty list), so missing context
+ * never reads as a mismatch. See registrableDomainOrSelf for the no-resolver
+ * fallback to exact comparison; a single domain on a different organization makes
+ * the result false.
+ */
+export function allDomainsOrganizationallyAlign(
+  reference: string | null,
+  domains: string[],
+  getRegistrableDomain?: (domain: string) => string | null,
+): boolean | null {
+  if (!reference || domains.length === 0) return null;
+  const referenceOrg = registrableDomainOrSelf(reference, getRegistrableDomain);
+  return domains.every(
+    (domain) => registrableDomainOrSelf(domain, getRegistrableDomain) === referenceOrg,
+  );
+}
+
+/**
  * Extract every resolvable domain from a mailbox-list value (RFC 5322
  * mailbox-list, the syntax of headers like Reply-To and To).
  *
@@ -289,6 +376,33 @@ function splitMailboxList(value: string): string[] {
 export function allDomainsMatch(reference: string | null, domains: string[]): boolean | null {
   if (!reference || domains.length === 0) return null;
   return domains.every((domain) => domain === reference);
+}
+
+/**
+ * Whether every domain in `domains` shares a registrable (organizational) domain
+ * with `reference` under the given PSL-backed resolver — the list complement to
+ * registrableDomainsMatch, used for mailbox-list headers such as Reply-To.
+ *
+ * Returns null — "no comparison was possible" — when `reference` is absent, the
+ * list is empty, the reference has no registrable form, or any listed domain has
+ * no registrable form. The last case stays silent rather than guessing because a
+ * domain with no registrable boundary cannot be confidently placed in the same
+ * organization as From; the exact comparator (allDomainsMatch) still reports that
+ * literal difference. Otherwise returns true only when every domain's registrable
+ * form equals the reference's; a single differing registrable domain makes it
+ * false.
+ */
+export function allRegistrableDomainsMatch(
+  reference: string | null,
+  domains: string[],
+  getRegistrableDomain: (domain: string) => string | null,
+): boolean | null {
+  if (!reference || domains.length === 0) return null;
+  const referenceRegistrable = getRegistrableDomain(reference);
+  if (!referenceRegistrable) return null;
+  const resolved = domains.map((domain) => getRegistrableDomain(domain));
+  if (resolved.some((registrable) => registrable === null)) return null;
+  return resolved.every((registrable) => registrable === referenceRegistrable);
 }
 
 /**

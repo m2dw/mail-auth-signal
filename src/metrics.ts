@@ -1,5 +1,7 @@
 import {
   allDomainsMatch,
+  allDomainsOrganizationallyAlign,
+  allRegistrableDomainsMatch,
   domainsExactlyMatch,
   extractDkimSigningDomain,
   extractDmarcHeaderFromDomain,
@@ -8,7 +10,10 @@ import {
   extractDomainsFromMailboxList,
   extractEnvelopeSenderDomain,
   isNullReversePath,
+  registrableDomainOrSelf,
+  registrableDomainsMatch,
 } from "./domains.js";
+import { getRegistrableDomain as builtinGetRegistrableDomain } from "./psl.js";
 import { getFirstHeaderValue, getHeaderValues, normalizeHeaders } from "./normalizeHeaders.js";
 import { parseAuthenticationResults } from "./parseAuthenticationResults.js";
 import { computeSenderIdentity } from "./senderIdentity.js";
@@ -72,11 +77,19 @@ export function collectDmarcHeaderFromDomains(
  * Trust is supplied by `isTrusted` rather than read from the baked header.trusted
  * flag, mirroring collectDmarcHeaderFromDomains, so the same set is derivable at
  * rule time if trust is declared after extraction.
+ *
+ * Layer 2 also carries a Public Suffix List–aware (organizational-domain) view
+ * (see OrganizationalAlignment) computed from the optional getRegistrableDomain
+ * resolver, alongside the exact-domain flags. The resolver is supplied by the
+ * caller because the registrable boundary needs PSL data this package does not
+ * bundle (see AGENTS.md / NOTICE); when omitted the organizational view degrades
+ * to exact-domain comparison and records resolverAvailable: false.
  */
 export function collectAuthenticationAlignment(
   headers: readonly AuthenticationResultsHeader[],
   fromDomain: string | null,
   isTrusted: (header: AuthenticationResultsHeader) => boolean,
+  getRegistrableDomain?: (domain: string) => string | null,
 ): AuthenticationAlignment {
   let trustedHeaderCount = 0;
   let untrustedHeaderCount = 0;
@@ -132,6 +145,45 @@ export function collectAuthenticationAlignment(
   const anyAlignedDkimPass = fromDomain !== null && alignedDkimDomains.includes(fromDomain);
   const dmarcPass = dmarcResults.some((dmarc) => dmarc.trusted && dmarc.result === "pass");
 
+  // PSL-aware (organizational-domain) alignment over the same trusted+passing
+  // domains. registrableDomainOrSelf falls back to the domain itself when no
+  // resolver is supplied, so the organizational view degrades to exact comparison
+  // rather than going null — see OrganizationalAlignment. The From organizational
+  // domain is resolved once and reused for the any/unaligned computations.
+  const fromOrg =
+    fromDomain !== null ? registrableDomainOrSelf(fromDomain, getRegistrableDomain) : null;
+  const orgAligns = (domain: string): boolean =>
+    fromOrg !== null && registrableDomainOrSelf(domain, getRegistrableDomain) === fromOrg;
+  const unalignedPassingSpfDomains =
+    fromOrg === null ? [] : [...new Set(alignedSpfMailfroms.filter((d) => !orgAligns(d)))];
+  const unalignedPassingDkimDomains =
+    fromOrg === null ? [] : [...new Set(alignedDkimDomains.filter((d) => !orgAligns(d)))];
+  const anyOrgSpfAligned = alignedSpfMailfroms.some(orgAligns);
+  const anyOrgDkimAligned = alignedDkimDomains.some(orgAligns);
+  // A trusted DMARC pass whose header.from shares a registrable domain with From
+  // authenticates the From organization even when the header carries no SPF/DKIM
+  // method lines (a bare `dmarc=pass header.from=example.co.jp` aggregate). Mirror
+  // orgAligns so From `news.example.co.jp` is covered by a pass for `example.co.jp`;
+  // only trusted passes vote, and with no resolver this degrades to exact comparison.
+  const anyOrgDmarcPassAligned = dmarcResults.some(
+    (dmarc) =>
+      dmarc.trusted &&
+      dmarc.result === "pass" &&
+      dmarc.headerFrom !== null &&
+      orgAligns(dmarc.headerFrom),
+  );
+  const organizational = {
+    resolverAvailable: getRegistrableDomain !== undefined,
+    spfAligned: allDomainsOrganizationallyAlign(fromDomain, alignedSpfMailfroms, getRegistrableDomain),
+    dkimAligned: allDomainsOrganizationallyAlign(fromDomain, alignedDkimDomains, getRegistrableDomain),
+    anySpfAligned: anyOrgSpfAligned,
+    anyDkimAligned: anyOrgDkimAligned,
+    anyAuthAligned: anyOrgSpfAligned || anyOrgDkimAligned,
+    dmarcPassAligned: anyOrgDmarcPassAligned,
+    unalignedPassingSpfDomains,
+    unalignedPassingDkimDomains,
+  };
+
   return {
     trustedHeaderCount,
     untrustedHeaderCount,
@@ -144,6 +196,7 @@ export function collectAuthenticationAlignment(
     anyAlignedDkimPass,
     dmarcPass,
     anyAuthAligned: anyAlignedSpfPass || anyAlignedDkimPass,
+    organizational,
   };
 }
 
@@ -159,10 +212,30 @@ export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies):
   const headers = normalizeHeaders(input.headers);
   const trustedAuthservIds = input.options?.trustedAuthservIds ?? [];
 
+  // PSL-backed resolver for the registrable-domain comparisons below. A caller can
+  // override the built-in tldts resolver via deps, or opt out with
+  // `getRegistrableDomain: () => null`; this mirrors computeSenderIdentity so the
+  // top-level registrable metrics and senderIdentity agree on the same boundary.
+  const structuralResolver = deps?.getRegistrableDomain ?? builtinGetRegistrableDomain;
+
   const fromValue = getFirstHeaderValue(headers, "from");
   const fromDomain = extractDomainFromMailbox(fromValue);
   const messageIdDomain = extractDomainFromMessageId(getFirstHeaderValue(headers, "message-id"));
   const messageIdDomainMatchesFromDomain = domainsExactlyMatch(fromDomain, messageIdDomain);
+
+  // Sender is the RFC 5322 mailbox of the agent that actually submitted the
+  // message when it differs from the author (From). It is a single mailbox, so it
+  // is parsed with the same hardened From extractor; a divergent Sender domain is a
+  // consistency hint complementary to From, reported both exactly and (via the
+  // resolver) at the registrable boundary. Use the first instance like From.
+  const senderValue = getFirstHeaderValue(headers, "sender");
+  const senderDomain = extractDomainFromMailbox(senderValue);
+  const senderDomainMatchesFromDomain = domainsExactlyMatch(fromDomain, senderDomain);
+  const senderDomainRegistrableMatchesFromDomain = registrableDomainsMatch(
+    fromDomain,
+    senderDomain,
+    structuralResolver,
+  );
 
   // Reply-To is a mailbox-list and may appear more than once; collect every
   // domain across all header instances, preserving order and dropping repeats.
@@ -172,6 +245,11 @@ export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies):
     ),
   ];
   const replyToDomainMatchesFromDomain = allDomainsMatch(fromDomain, replyToDomains);
+  const replyToDomainRegistrableMatchesFromDomain = allRegistrableDomainsMatch(
+    fromDomain,
+    replyToDomains,
+    structuralResolver,
+  );
 
   const authenticationResults = getHeaderValues(headers, "authentication-results").map((raw) =>
     parseAuthenticationResults(raw, trustedAuthservIds),
@@ -184,6 +262,11 @@ export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies):
   const returnPathNullReversePath = isNullReversePath(returnPathValue);
   const returnPathDomain = extractEnvelopeSenderDomain(returnPathValue);
   const returnPathDomainMatchesFromDomain = domainsExactlyMatch(fromDomain, returnPathDomain);
+  const returnPathDomainRegistrableMatchesFromDomain = registrableDomainsMatch(
+    fromDomain,
+    returnPathDomain,
+    structuralResolver,
+  );
 
   // smtp.mailfrom is the envelope-from SPF authenticated. Collect it from every
   // SPF result across all Authentication-Results headers, preserving order and
@@ -245,23 +328,31 @@ export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies):
     authenticationResults,
     fromDomain,
     (header) => header.trusted,
+    deps?.getRegistrableDomain,
   );
 
   // Sender-identity metrics (display-name structure, local-part/domain lexical
-  // profiles, label decomposition, optional registrable-domain comparison). Pure
-  // facts derived from the raw From value plus the already-extracted From and
-  // Message-ID domains; the optional resolver is injected via deps (never bundled).
+  // profiles, label decomposition, PSL-backed registrable-domain comparison).
+  // Pure facts derived from the raw From value plus the already-extracted From
+  // and Message-ID domains. Structural domain parts use the built-in tldts
+  // resolver by default (see senderIdentity.ts); equality comparisons require
+  // an explicit caller-supplied resolver in deps.
   const senderIdentity = computeSenderIdentity(fromValue, fromDomain, messageIdDomain, deps);
 
   return {
     fromDomain,
+    senderDomain,
+    senderDomainMatchesFromDomain,
+    senderDomainRegistrableMatchesFromDomain,
     messageIdDomain,
     messageIdDomainMatchesFromDomain,
     replyToDomains,
     replyToDomainMatchesFromDomain,
+    replyToDomainRegistrableMatchesFromDomain,
     returnPathDomain,
     returnPathNullReversePath,
     returnPathDomainMatchesFromDomain,
+    returnPathDomainRegistrableMatchesFromDomain,
     smtpMailfromDomains,
     smtpMailfromDomainMatchesFromDomain,
     envelopeSenderDomainsAgree,

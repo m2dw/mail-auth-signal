@@ -8,10 +8,20 @@
         "shannonEntropy": 0,
         "normalizedEntropy": 0,
         "vowelRatio": 0,
+        "digitRatio": 0,
+        "hyphenRatio": 0,
+        "maxHexRun": 0,
         "maxConsonantRun": 0,
         "maxRepeatedCharRun": 0,
         "uniqueCharRatio": 0,
-        "letterDigitTransitions": 0
+        "letterDigitTransitions": 0,
+        "alphaLength": 0,
+        "vowelCount": 0,
+        "vowelRatioAlphaOnly": 0,
+        "hyphenCount": 0,
+        "uniqueCharCount": 0,
+        "letterDigitTransitionCount": 0,
+        "hasLongHexLikeRun": false
       }
     },
     {
@@ -21,49 +31,135 @@
         "shannonEntropy": 0,
         "normalizedEntropy": 0,
         "vowelRatio": 1,
+        "digitRatio": 0,
+        "hyphenRatio": 0,
+        "maxHexRun": 4,
         "maxConsonantRun": 0,
         "maxRepeatedCharRun": 4,
         "uniqueCharRatio": 0.25,
-        "letterDigitTransitions": 0
+        "letterDigitTransitions": 0,
+        "alphaLength": 4,
+        "vowelCount": 4,
+        "vowelRatioAlphaOnly": 1,
+        "hyphenCount": 0,
+        "uniqueCharCount": 1,
+        "letterDigitTransitionCount": 0,
+        "hasLongHexLikeRun": false
       }
     },
     {
-      "label": "all-distinct consonants: max-length normalized entropy, full consonant run, zero vowels",
+      "label": "all-distinct consonants: max-length normalized entropy, full consonant run, zero vowels, no hex",
       "input": "xyz",
       "expected": {
         "shannonEntropy": 1.585,
         "normalizedEntropy": 1,
         "vowelRatio": 0,
+        "digitRatio": 0,
+        "hyphenRatio": 0,
+        "maxHexRun": 0,
         "maxConsonantRun": 3,
         "maxRepeatedCharRun": 1,
         "uniqueCharRatio": 1,
-        "letterDigitTransitions": 0
+        "letterDigitTransitions": 0,
+        "alphaLength": 3,
+        "vowelCount": 1,
+        "vowelRatioAlphaOnly": 0.3333,
+        "hyphenCount": 0,
+        "uniqueCharCount": 3,
+        "letterDigitTransitionCount": 0,
+        "hasLongHexLikeRun": false
       }
     },
     {
-      "label": "letters and digits alternating: two letter/digit transitions, repeated character classes",
+      "label": "letters and digits alternating: two letter/digit transitions, all-hex token, digit ratio",
       "input": "ab12ab",
       "expected": {
         "shannonEntropy": 1.9183,
         "normalizedEntropy": 0.7421,
         "vowelRatio": 0.5,
+        "digitRatio": 0.3333,
+        "hyphenRatio": 0,
+        "maxHexRun": 6,
         "maxConsonantRun": 1,
         "maxRepeatedCharRun": 1,
         "uniqueCharRatio": 0.6667,
-        "letterDigitTransitions": 2
+        "letterDigitTransitions": 2,
+        "alphaLength": 4,
+        "vowelCount": 2,
+        "vowelRatioAlphaOnly": 0.5,
+        "hyphenCount": 0,
+        "uniqueCharCount": 4,
+        "letterDigitTransitionCount": 2,
+        "hasLongHexLikeRun": true
       }
     },
     {
-      "label": "non-ASCII codepoint counts toward length/entropy but is not a letter or vowel",
+      "label": "non-ASCII codepoint counts toward length/entropy but is not a letter, vowel, or hex char",
       "input": "café",
       "expected": {
         "shannonEntropy": 2,
         "normalizedEntropy": 1,
         "vowelRatio": 0.3333,
+        "digitRatio": 0,
+        "hyphenRatio": 0,
+        "maxHexRun": 3,
         "maxConsonantRun": 1,
         "maxRepeatedCharRun": 1,
         "uniqueCharRatio": 1,
-        "letterDigitTransitions": 0
+        "letterDigitTransitions": 0,
+        "alphaLength": 3,
+        "vowelCount": 1,
+        "vowelRatioAlphaOnly": 0.3333,
+        "hyphenCount": 0,
+        "uniqueCharCount": 4,
+        "letterDigitTransitionCount": 0,
+        "hasLongHexLikeRun": false
+      }
+    },
+    {
+      "label": "hyphenated token: hyphen ratio counts hyphens, each hyphen breaks the hex run",
+      "input": "a-b-c",
+      "expected": {
+        "shannonEntropy": 1.9219,
+        "normalizedEntropy": 0.8277,
+        "vowelRatio": 0.3333,
+        "digitRatio": 0,
+        "hyphenRatio": 0.4,
+        "maxHexRun": 1,
+        "maxConsonantRun": 1,
+        "maxRepeatedCharRun": 1,
+        "uniqueCharRatio": 0.8,
+        "letterDigitTransitions": 0,
+        "alphaLength": 3,
+        "vowelCount": 1,
+        "vowelRatioAlphaOnly": 0.3333,
+        "hyphenCount": 2,
+        "uniqueCharCount": 4,
+        "letterDigitTransitionCount": 0,
+        "hasLongHexLikeRun": false
+      }
+    },
+    {
+      "label": "all-hex word: full hex run spans the whole token even though a/b/e are also letters",
+      "input": "deadbeef",
+      "expected": {
+        "shannonEntropy": 2.1556,
+        "normalizedEntropy": 0.7185,
+        "vowelRatio": 0.5,
+        "digitRatio": 0,
+        "hyphenRatio": 0,
+        "maxHexRun": 8,
+        "maxConsonantRun": 2,
+        "maxRepeatedCharRun": 2,
+        "uniqueCharRatio": 0.625,
+        "letterDigitTransitions": 0,
+        "alphaLength": 8,
+        "vowelCount": 4,
+        "vowelRatioAlphaOnly": 0.5,
+        "hyphenCount": 0,
+        "uniqueCharCount": 5,
+        "letterDigitTransitionCount": 0,
+        "hasLongHexLikeRun": false
       }
     }
   ]

@@ -1,5 +1,5 @@
 {
-  "description": "Benign sender: a plain display name with no embedded address, a short alphabetic local part, and a Message-ID stamped from the same domain as From. No lexical anomaly (no digits, hyphens, or non-ASCII), and the display name contains no email-like token, so containsEmail is false and embeddedDomainMatchesFromDomain stays null. Registrable-domain fields are null because no PSL resolver is supplied.",
+  "description": "Benign sender: a plain display name with no embedded address, a short alphabetic local part, and a Message-ID stamped from the same domain as From. No lexical anomaly (no digits, hyphens, or non-ASCII), and the display name contains no email-like token, so containsEmail is false and embeddedDomainMatchesFromDomain stays null. fromDomainParts, messageIdDomainParts, and messageIdRegistrableDomainMatchesFromDomain are all populated by the built-in PSL resolver.",
   "input": {
     "headers": {
       "from": "Example Sender <notice@example.com>",
@@ -15,30 +15,86 @@
       "containsEmail": false,
       "embeddedDomains": [],
       "embeddedDomainMatchesFromDomain": null,
-      "normalized": { "compactedWhitespace": "ExampleSender" },
-      "metrics": { "whitespaceCompactedChanged": true },
-      "signals": { "spacedDisplayNameCamouflageCandidate": false }
+      "normalized": {
+        "compactedWhitespace": "ExampleSender",
+        "latinFolded": "Example Sender"
+      },
+      "metrics": {
+        "whitespaceCompactedChanged": true,
+        "latinFoldedChanged": false
+      },
+      "signals": {
+        "spacedDisplayNameCamouflageCandidate": false,
+        "hasNonLatinScript": false,
+        "hasMixedScript": false
+      }
     },
     "localPart": "notice",
-    "localPartLexical": { "length": 6, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
-    "fromDomainLexical": { "length": 11, "digitCount": 0, "hyphenCount": 0, "hasNonAscii": false },
+    "localPartLexical": {
+      "length": 6,
+      "digitCount": 0,
+      "hyphenCount": 0,
+      "hasNonAscii": false
+    },
+    "fromDomainLexical": {
+      "length": 11,
+      "digitCount": 0,
+      "hyphenCount": 0,
+      "hasNonAscii": false
+    },
     "fromDomainParts": {
       "domain": "example.com",
-      "labels": ["example", "com"],
+      "labels": [
+        "example",
+        "com"
+      ],
       "labelCount": 2,
       "topLabel": "com",
-      "registrableDomain": null,
-      "subdomainDepth": null
+      "registrableDomain": "example.com",
+      "subdomainDepth": 0,
+      "labelMetrics": [
+        {
+          "label": "example",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        },
+        {
+          "label": "com",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        }
+      ],
+      "hasConsecutiveHyphen": false,
+      "hasPunycodeLabel": false,
+      "hasConsecutiveHyphenOutsidePunycode": false
     },
     "messageIdDomainParts": {
       "domain": "example.com",
-      "labels": ["example", "com"],
+      "labels": [
+        "example",
+        "com"
+      ],
       "labelCount": 2,
       "topLabel": "com",
-      "registrableDomain": null,
-      "subdomainDepth": null
+      "registrableDomain": "example.com",
+      "subdomainDepth": 0,
+      "labelMetrics": [
+        {
+          "label": "example",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        },
+        {
+          "label": "com",
+          "isPunycode": false,
+          "hasConsecutiveHyphen": false
+        }
+      ],
+      "hasConsecutiveHyphen": false,
+      "hasPunycodeLabel": false,
+      "hasConsecutiveHyphenOutsidePunycode": false
     },
-    "messageIdRegistrableDomainMatchesFromDomain": null,
+    "messageIdRegistrableDomainMatchesFromDomain": true,
     "fromDomainIsPublicMailboxProvider": false,
     "publicMailboxProviderId": null
   }

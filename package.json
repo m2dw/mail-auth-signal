@@ -1,6 +1,6 @@
 {
   "name": "mail-auth-signal",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A lightweight sender-risk signal engine for email authentication results and header consistency analysis.",
   "license": "Apache-2.0",
   "author": "m2dw",
@@ -28,6 +28,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "release:check": "npm run typecheck && npm test && npm run build && npm pack --dry-run",
+    "release:promote": "node scripts/release-promote.mjs",
+    "release:publish-tag": "node scripts/release-publish-tag.mjs",
     "prepack": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test"
   },
@@ -56,5 +58,8 @@
     "authentication-results",
     "sender-risk",
     "mail-security"
-  ]
+  ],
+  "dependencies": {
+    "tldts": "^6.1.86"
+  }
 }

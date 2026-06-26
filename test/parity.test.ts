@@ -68,13 +68,18 @@ const fixtures: ParityFixture[] = [
 /** Every metric key extractMetrics produces; a fixture must pin all of them. */
 const METRIC_KEYS: readonly string[] = [
   "fromDomain",
+  "senderDomain",
+  "senderDomainMatchesFromDomain",
+  "senderDomainRegistrableMatchesFromDomain",
   "messageIdDomain",
   "messageIdDomainMatchesFromDomain",
   "replyToDomains",
   "replyToDomainMatchesFromDomain",
+  "replyToDomainRegistrableMatchesFromDomain",
   "returnPathDomain",
   "returnPathNullReversePath",
   "returnPathDomainMatchesFromDomain",
+  "returnPathDomainRegistrableMatchesFromDomain",
   "smtpMailfromDomains",
   "smtpMailfromDomainMatchesFromDomain",
   "envelopeSenderDomainsAgree",

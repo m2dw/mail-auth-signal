@@ -38,15 +38,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Node.js
+        # Node 24 (Active LTS) ships an npm new enough for OIDC trusted
+        # publishing; the explicit upgrade below pins the documented minimum.
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
 
-      # Trusted publishing (tokenless OIDC) requires a recent npm. Upgrading
-      # also keeps provenance generation current.
-      - name: Update npm
-        run: npm install -g npm@latest
+      # npm trusted publishing (tokenless OIDC) with provenance requires
+      # npm >= 11.5.1. Pin the floor so the workflow keeps working even if the
+      # bundled npm changes. See RELEASING.md (Trusted Publisher settings).
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci

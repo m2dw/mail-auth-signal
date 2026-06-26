@@ -46,6 +46,13 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     it is suppressed — only a pass whose header.from equals the visible From
  *     counts (a pass for a *different* header.from is itself the
  *     dmarc.headerFromMismatch spoof tell, and an untrusted pass is forge-able).
+ *   - not aligned under the PSL-aware (organizational) view either:
+ *     organizational.anyAuthAligned / organizational.dmarcPassAligned apply DMARC's
+ *     relaxed (registrable-domain) comparison, so a public-mailbox From authenticated
+ *     by a same-organization subdomain identifier under a supplied resolver is treated
+ *     as authenticated and not flagged. Both degrade to exact comparison with no
+ *     resolver and count only trusted, passing results, so this is a strict superset
+ *     of the exact checks above and never suppresses a genuine spoof.
  *
  * Not attacker-triggerable against a third party. The only way to *suppress* this
  * is to present aligned, trusted authentication for the public-mailbox From, which
@@ -96,6 +103,18 @@ export const publicMailboxSpoofingCandidateRule: CompositeRule = {
         result.headerFrom === fromDomain,
     );
     if (hasAlignedTrustedDmarcPass) return [];
+    // Honor the PSL-aware (organizational) view as the practical default: a
+    // public-mailbox From authenticated by a same-organization identifier under a
+    // supplied resolver (e.g. From `outlook.com` with a trusted, passing identifier
+    // on a subdomain of outlook.com) is DMARC-relaxed authenticated, even though the
+    // exact-domain anyAuthAligned reads the subdomain difference as unaligned.
+    // organizational.dmarcPassAligned likewise honors a trusted aggregate `dmarc=pass
+    // header.from=<org>` for the From's registrable domain. Both degrade to exact
+    // comparison with no resolver and count only trusted, passing results, so this is
+    // a strict superset of the checks above that never suppresses a genuine spoof and
+    // is not attacker-triggerable by a spoofer of a domain they do not control.
+    if (authentication.organizational.anyAuthAligned) return [];
+    if (authentication.organizational.dmarcPassAligned) return [];
 
     // Basis trace: the trusted auth-failure signals that evidence the missing
     // alignment. An untrusted failure is the attacker's own assertion and is never

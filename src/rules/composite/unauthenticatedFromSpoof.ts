@@ -41,11 +41,20 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     evaluated for SPF/DKIM/DMARC would read as a confirmed unauthenticated From,
  *     so "not aligned" is only treated as evidence once a sender-auth check has
  *     actually run.
- *   - anyAuthAligned === false: a message with even one aligned, trusted, passing
- *     SPF or DKIM identifier for the From domain is, by DMARC's own logic,
- *     authenticated as that domain — so a forwarder that fails SPF but keeps an
- *     aligned DKIM signature does not trip this. Only the genuinely
- *     unauthenticated From reaches here.
+ *   - not aligned under the PSL-aware (organizational) view: a message with even
+ *     one aligned, trusted, passing SPF or DKIM identifier for the From domain is,
+ *     by DMARC's own logic, authenticated as that domain — so a forwarder that
+ *     fails SPF but keeps an aligned DKIM signature does not trip this. This honors
+ *     organizational (relaxed) alignment as the practical default: a From subdomain
+ *     whose trusted, passing identifier sits on the same registrable domain (From
+ *     `news.example.co.jp`, DKIM `header.d=example.co.jp`, with a caller-supplied
+ *     resolver) is DMARC-relaxed authenticated even though the exact-domain
+ *     anyAuthAligned reads the subdomain difference as unaligned. Without it the
+ *     rule would emit a spoof on legitimate relaxed-aligned subdomain mail, because
+ *     the exact SPF/DKIM mismatch consistency signals remain present. When no
+ *     resolver is supplied the organizational view degrades to exact comparison, so
+ *     this is a strict superset of the exact check and never suppresses a genuine
+ *     spoof. Only the genuinely unauthenticated From reaches here.
  *   - no aligned trusted DMARC pass: a trusted Authentication-Results header can
  *     report only an aggregate DMARC verdict (`dmarc=pass header.from=brand.example`)
  *     with no SPF/DKIM method lines, which leaves anyAuthAligned vacuously false even
@@ -53,10 +62,14 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     DKIM identifier — passed for the visible From. Treating that as unauthenticated
  *     would let any benign identifier mismatch (e.g. a different Message-ID host) emit
  *     a high spoof on mail the verifier explicitly vouched for. A trusted DMARC pass
- *     whose header.from equals the visible From therefore also short-circuits the rule.
- *     Only a pass for that exact From counts: a trusted pass for a *different*
- *     header.from is itself a spoof tell (dmarc.headerFromMismatch), not authentication
- *     of the visible From, and an untrusted DMARC pass is forge-able. An attacker
+ *     whose header.from shares a registrable domain with the visible From therefore also
+ *     short-circuits the rule (organizational.dmarcPassAligned) — the same PSL-aware
+ *     comparison as the alignment guard, so a `dmarc=pass header.from=example.co.jp` for
+ *     a From of `news.example.co.jp` is honored, and with no resolver it degrades to
+ *     exact comparison. Only a pass for the same organization counts: a trusted pass for
+ *     a *different* registrable domain is itself a spoof tell (dmarc.headerFromMismatch),
+ *     not authentication of the visible From, and an untrusted DMARC pass is forge-able.
+ *     An attacker
  *     spoofing a domain they do not control cannot make the trusted verifier emit an
  *     aligned DMARC pass for it, so this suppression is not attacker-triggerable.
  *   - at least one *authoritative* divergent identifier: a misconfigured-but-honest
@@ -111,23 +124,29 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
       authentication.dmarcResults.some((result) => result.trusted);
     if (!hasTrustedSenderAuth) return [];
     // An aligned, trusted, passing identifier authenticates the From domain.
+    // Honor the PSL-aware (organizational) view as the practical default so a
+    // DMARC-relaxed aligned subdomain (From news.example.co.jp authenticated by an
+    // identifier on example.co.jp under a supplied resolver) is treated as
+    // authenticated, not spoofed — even though the exact-domain check below still
+    // reads the subdomain difference as unaligned and the exact SPF/DKIM mismatch
+    // consistency signals remain present. With no resolver the organizational view
+    // degrades to exact comparison, so this never suppresses a genuine spoof.
     if (authentication.anyAuthAligned !== false) return [];
-    // A trusted verifier's DMARC pass for the *visible* From domain also
+    if (authentication.organizational.anyAuthAligned) return [];
+    // A trusted verifier's DMARC pass for the visible From's *organization* also
     // authenticates that From, even when the same header omits the SPF/DKIM method
     // lines anyAuthAligned is computed from (a bare `dmarc=pass header.from=From`
     // aggregate leaves anyAuthAligned vacuously false). DMARC passes only when an
     // aligned SPF or DKIM identifier satisfied the From domain's policy, so this is
-    // not an unauthenticated From. Only a pass whose header.from equals the visible
-    // From counts — a trusted pass for a different header.from is the
-    // dmarc.headerFromMismatch spoof tell, and an untrusted pass is forge-able.
-    const hasAlignedTrustedDmarcPass = authentication.dmarcResults.some(
-      (result) =>
-        result.trusted &&
-        result.result === "pass" &&
-        result.headerFrom !== null &&
-        result.headerFrom === fromDomain,
-    );
-    if (hasAlignedTrustedDmarcPass) return [];
+    // not an unauthenticated From. organizational.dmarcPassAligned applies the same
+    // PSL-aware (relaxed) comparison as the alignment check above, so a trusted
+    // `dmarc=pass header.from=example.co.jp` for a From of `news.example.co.jp`
+    // suppresses the spoof; with no resolver it degrades to exact comparison. A
+    // trusted pass for a *different* registrable domain is the dmarc.headerFromMismatch
+    // spoof tell rather than authentication, and an untrusted pass is forge-able —
+    // both excluded because dmarcPassAligned counts only trusted, organizationally
+    // aligned passes.
+    if (authentication.organizational.dmarcPassAligned) return [];
 
     const consistencyKeys = signals
       .filter((signal) => signal.category === "consistency")

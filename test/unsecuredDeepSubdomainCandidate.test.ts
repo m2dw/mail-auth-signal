@@ -208,9 +208,9 @@ describe("composite.unsecuredDeepSubdomainCandidate", () => {
     expect(candidate(result.signals)).toBeUndefined();
   });
 
-  it("stays silent without a PSL resolver (subdomain depth is unknown)", () => {
-    // No resolver injected, so fromDomainParts.subdomainDepth is null and a deep
-    // subdomain cannot be distinguished from a registrable domain.
+  it("stays silent when PSL resolution is explicitly disabled (subdomain depth is unknown)", () => {
+    // Passing getRegistrableDomain: () => null opts out of the built-in resolver;
+    // without a registrable domain, subdomainDepth is null and the rule stays silent.
     const result = analyzeMessage(
       {
         headers: {
@@ -220,7 +220,7 @@ describe("composite.unsecuredDeepSubdomainCandidate", () => {
         options: { trustedAuthservIds: [TRUSTED_ID] },
       },
       defaultRules,
-      undefined,
+      { getRegistrableDomain: () => null },
       defaultCompositeRules,
     );
     expect(result.metrics.senderIdentity.fromDomainParts?.subdomainDepth).toBeNull();
