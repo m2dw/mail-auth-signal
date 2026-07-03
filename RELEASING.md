@@ -188,7 +188,19 @@ private `main` with a clean working tree.
 
    Commit the changelog and version bump to the private `main`.
 
-4. **Verify the release locally.** This runs typecheck, tests, build, and a
+4. **Verify the changelog guard locally (automatic at promotion).** Stage 1
+   (`release:promote`) automatically checks `CHANGELOG.md` before doing any git
+   work. The guard verifies:
+
+   - A `## vX.Y.Z` heading for the target version is present.
+   - An `## Unreleased` section exists at the top.
+   - The `## Unreleased` section contains no real bullet content (only blank
+     lines or HTML comments are allowed).
+
+   If any condition fails, `release:promote` aborts with an actionable message
+   before touching the public repository. Fix the changelog and re-run.
+
+5. **Verify the release locally.** This runs typecheck, tests, build, and a
    dry-run package inspection in one shot:
 
    ```sh
@@ -206,7 +218,7 @@ private `main` with a clean working tree.
    Confirm the [package contents](#package-contents) are exactly the intended
    files. (Stage 1 re-runs this check on the exact tree it promotes.)
 
-5. **Promote and publish.** Run the two-stage flow:
+6. **Promote and publish.** Run the two-stage flow:
 
    ```sh
    npm run release:promote -- X.Y.Z -- --open-pr   # Stage 1: public release PR
@@ -221,7 +233,7 @@ private `main` with a clean working tree.
    and publishes with provenance. If the `release` environment requires a
    reviewer, approve the run.
 
-6. **Verify the publish.**
+7. **Verify the publish.**
 
    ```sh
    npm view mail-auth-signal version

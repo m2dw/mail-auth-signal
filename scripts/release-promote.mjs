@@ -29,6 +29,7 @@ import {
   PRIVATE_PATHS,
   PUBLIC_REPO,
   assertCleanWorktree,
+  checkChangelogGuard,
   exec,
   fail,
   info,
@@ -88,7 +89,16 @@ assertCleanWorktree(dryRun);
 step(`Fetching ${remote.name}/${baseBranch}`);
 exec('git', ['fetch', remote.name, baseBranch], { dryRun });
 
-// 4. Existing release checks on the exact tree being promoted (current HEAD).
+// 4a. Changelog guard — must pass before doing any git work.
+step('Checking changelog (CHANGELOG.md)');
+if (dryRun) {
+  info(`  [dry-run] would verify CHANGELOG.md has v${version} heading and empty Unreleased section`);
+} else {
+  checkChangelogGuard(version);
+  info(`  CHANGELOG.md: v${version} heading present, Unreleased section is clean`);
+}
+
+// 4b. Existing release checks on the exact tree being promoted (current HEAD).
 if (flags['skip-checks']) {
   warn('skipping release checks because --skip-checks is set.');
 } else {

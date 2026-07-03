@@ -33,8 +33,7 @@ repository:
   repo-wide search shows there is *no* string-similarity / Jaro-Winkler /
   edit-distance code here, and `src/types.ts` already records bigram naturalness
   as a deliberate omission),
-- the package boundary fixed in [`AGENTS.md`](./AGENTS.md) and
-  [`CLAUDE.md`](./CLAUDE.md), which decides what is core versus caller-owned.
+- the package boundary fixed in [`AGENTS.md`](./AGENTS.md), which decides what is core versus caller-owned.
 
 Each named module is mapped below to exactly one classification. Where a module
 is *Migrated*, the owning source/tests in this repo are named; where it is

@@ -433,7 +433,7 @@ a spoof read as organizationally aligned.
 
 Computing the registrable boundary correctly (e.g. `co.jp` vs `com`) needs Public
 Suffix List data, which this package intentionally does not bundle (license
-boundary; see `NOTICE` / `AGENTS.md`). The boundary is taken from the
+boundary; see `NOTICE`). The boundary is taken from the
 caller-supplied `MetricsDependencies.getRegistrableDomain` resolver, threaded
 through `analyzeMessage` / `extractMetrics` / `runRules` / `runCompositeRules`.
 When no resolver is supplied these fields degrade cleanly to exact-domain
@@ -576,7 +576,7 @@ resolver if supplied.
 
 The catalog is *bundled data the core owns* — deliberately small and hand-authored,
 not an imported PSL/brand list, so it crosses no external-data license boundary
-(`AGENTS.md` / `NOTICE`). It is also exported and overridable:
+(see `NOTICE`). It is also exported and overridable:
 
 ```ts
 import {
@@ -669,7 +669,7 @@ party.
 
 **Data boundary.** The reusable inference logic is **library-owned**, but the
 brand catalog itself is **caller-supplied data** — brand/top-domain lists are
-exactly the external data this package keeps out (see `AGENTS.md` / `NOTICE`), so
+exactly the external data this package keeps out (see `NOTICE`), so
 the core bundles none and `brandInference` is omitted entirely unless a catalog is
 passed. `BrandCatalogEntry` is a first-class typed API (`{ brand, domains }`), and
 `foldLatinDiacritics` / `normalizeBrandToken` / `computeDisplayNameBrandInference`
@@ -775,7 +775,7 @@ cross-language ports compare exactly.
 brand dictionary, language corpus, or n-gram table. Bigram/trigram "naturalness"
 was considered and **deliberately left caller-owned**: a meaningful naturalness score
 needs a language-frequency dataset, and bundling one would cross the data/license
-boundary this package keeps clear (see `AGENTS.md` / `NOTICE`). It is the one Layer 3
+boundary this package keeps clear (see `NOTICE`). It is the one Layer 3
 heuristic the library does not compute itself; instead `computeRandomLookingCandidate`
 accepts the caller's model through `options.isNatural` (above) so a caller with its own
 licensed corpus reaches full add-on parity without the library shipping the corpus.
@@ -884,8 +884,8 @@ network, or scoring policy):
 Add-on behavior that is intentionally **not** migrated — UI, notifications,
 mailbox/folder actions, storage, Thunderbird/WebExtension APIs, network/DNS, and
 the caller-owned policy modules `customFormulas.js`, `whitelist.js`, `scoring.js`,
-plus brand/word-list data — stays caller-owned by the boundary in
-[`AGENTS.md`](./AGENTS.md).
+plus brand/word-list data — stays caller-owned by the architecture boundary
+described in the [API boundary](#api-boundary) section.
 
 Open items in the audit: one **license decision** — whether to ever bundle the
 language-frequency corpus that `bigramNaturalness.js` would require (*Needs

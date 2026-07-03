@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## v0.5.1 — 2026-07-03
 - Migrated further Layer 4 composite rule signals into the reusable core (issue #65),
   extending `defaultCompositeRules` with five named, stable, opt-in signals. Each
   emits structured data with severity hints only — no score deltas, thresholds, or
