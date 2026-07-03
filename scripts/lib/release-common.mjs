@@ -301,6 +301,82 @@ export function remoteRefExists(remoteName, ref) {
   return stdout.length > 0;
 }
 
+// ---------------------------------------------------------------------------
+// Changelog guard
+// ---------------------------------------------------------------------------
+
+// Lines in the Unreleased section that count as placeholder / empty content.
+// A section containing only these patterns (after trimming) is considered clean.
+const CHANGELOG_PLACEHOLDER_RE = /^<!--.*-->$|^\s*$/;
+
+// Pure-logic changelog guard — validates the text of a changelog string against
+// the requirements for releasing `version`. Throws an Error with an actionable
+// message on any violation. Exported for unit testing.
+export function checkChangelogBody(text, version) {
+  const lines = text.split('\n');
+
+  // 1. Target version heading must exist.
+  const versionHeadingRe = new RegExp(`^##\\s+v${version.replace(/\./g, '\\.')}(?:\\s|$)`);
+  if (!lines.some((l) => versionHeadingRe.test(l))) {
+    throw new Error(
+      `CHANGELOG.md is missing a heading for v${version}.\n` +
+        `  Add a "## v${version} — YYYY-MM-DD" section before releasing.`,
+    );
+  }
+
+  // 2. Unreleased section must exist and must appear before the version heading.
+  const unreleasedIdx = lines.findIndex((l) => /^##\s+Unreleased\b/i.test(l));
+  const versionHeadingIdx = lines.findIndex((l) => versionHeadingRe.test(l));
+  if (unreleasedIdx === -1) {
+    throw new Error(
+      `CHANGELOG.md is missing an "## Unreleased" section.\n` +
+        `  Add an empty "## Unreleased" section at the top of the changelog.`,
+    );
+  }
+  if (unreleasedIdx > versionHeadingIdx) {
+    throw new Error(
+      `CHANGELOG.md "## Unreleased" section must appear before "## v${version}".\n` +
+        `  Move the "## Unreleased" heading above "## v${version} — YYYY-MM-DD" before releasing.`,
+    );
+  }
+
+  // 3. Collect the Unreleased body (lines between its heading and the next ## heading).
+  const bodyLines = [];
+  for (let i = unreleasedIdx + 1; i < lines.length; i += 1) {
+    if (/^##\s/.test(lines[i])) break;
+    bodyLines.push(lines[i]);
+  }
+
+  const realContent = bodyLines.filter((l) => !CHANGELOG_PLACEHOLDER_RE.test(l.trim()));
+  if (realContent.length > 0) {
+    throw new Error(
+      `CHANGELOG.md "## Unreleased" section still has content that must be moved to "## v${version}".\n` +
+        `  Move those notes under "## v${version} — YYYY-MM-DD" before running release:promote.\n` +
+        `  Remaining lines:\n` +
+        realContent.slice(0, 5).map((l) => `    ${l}`).join('\n') +
+        (realContent.length > 5 ? `\n    … (${realContent.length - 5} more)` : ''),
+    );
+  }
+}
+
+// Check that CHANGELOG.md is ready for a release of `version`. Reads the file
+// from REPO_ROOT and calls `fail()` (process.exit) with an actionable message
+// on any violation.
+export function checkChangelogGuard(version) {
+  const changelogPath = resolve(REPO_ROOT, 'CHANGELOG.md');
+  let text;
+  try {
+    text = readFileSync(changelogPath, 'utf8');
+  } catch {
+    fail(`CHANGELOG.md not found at ${changelogPath}.`);
+  }
+  try {
+    checkChangelogBody(text, version);
+  } catch (err) {
+    fail(err.message);
+  }
+}
+
 // Return the object id `ref` currently points at on the remote, or null if it
 // does not exist. Used to build an explicit `--force-with-lease=<ref>:<oid>`
 // that works even in clones with no local remote-tracking ref for `ref`.
