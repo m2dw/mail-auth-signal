@@ -151,7 +151,7 @@ mismatch:
 | `trust` | An `Authentication-Results` header came from an untrusted authserv-id. | `auth.results.untrusted` |
 | `auth-failure` | An SPF/DKIM/DMARC method returned a failing or error result. | `auth.method.failure` |
 | `consistency` | Two domains that should agree do not. | `messageId.domainMismatch`, `replyTo.domainMismatch`, `returnPath.domainMismatch`, `smtpMailfrom.domainMismatch`, `dkim.domainMismatch`, `dmarc.headerFromMismatch`, `envelopeSender.domainDisagreement` |
-| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.publicMailboxSpoofingCandidate`, `composite.authenticatedDisplayNameSpoof`, `composite.unsecuredDeepSubdomainCandidate`, `composite.deepRandomFromSubdomain`, `composite.brandDivergencePhishing`, `composite.ownDomainSpoofCandidate`, `composite.dkimFailWithAlignedPass`, `composite.dkimAlignedLexicalMitigation`, `composite.alignedAuthenticationConfirmed` |
+| `composite` | A higher-layer observation that combines several of the above (the opt-in Layer 4 rules). | `composite.unauthenticatedFromSpoof`, `composite.publicMailboxSpoofingCandidate`, `composite.authenticatedDisplayNameSpoof`, `composite.unsecuredDeepSubdomainCandidate`, `composite.deepRandomFromSubdomain`, `composite.deepServiceWordSubdomain`, `composite.geoTokenCompoundDomain`, `composite.brandDivergencePhishing`, `composite.ownDomainSpoofCandidate`, `composite.dkimFailWithAlignedPass`, `composite.dkimAlignedLexicalMitigation`, `composite.alignedAuthenticationConfirmed` |
 
 Two conventions keep the surface coherent:
 
@@ -344,11 +344,13 @@ signals computed under the same `options`, exactly as `analyzeMessage` does).
 
 | Signal | Severity | Fires when | Attacker model / guard |
 |---|---|---|---|
-| `composite.unauthenticatedFromSpoof` | high | A trusted header evaluated the message, **no** aligned authentication vouches for the From domain (`anyAuthAligned === false`), **and** at least one base consistency signal disagrees with From. | Direct domain impersonation. Combines "From is unauthenticated" with "an identifier disagrees". Stays silent on unevaluable messages (no trusted header) and honest auth misconfigurations (no identifier mismatch). The only way to suppress it is to actually authenticate the From domain. |
+| `composite.unauthenticatedFromSpoof` | high | A trusted header evaluated the message, **no** aligned authentication vouches for the From domain (`anyAuthAligned === false`), **and** at least one base consistency signal disagrees with From. Suppressed by a rule-time-trusted `arc=pass` **only when the caller opts into the ARC forwarding-trust policy** (`options.context.trustArcForwarding === true`, exported as `ARC_TRUSTED_FORWARDING_CONTEXT_KEY`). | Direct domain impersonation. Combines "From is unauthenticated" with "an identifier disagrees". Stays silent on unevaluable messages (no trusted header) and honest auth misconfigurations (no identifier mismatch). **Forwarding/list false-positive risk:** legitimate forwarders and lists rewrite the envelope (SPF fails, Return-Path/smtp.mailfrom diverge) without spoofing the From, reproducing this shape. A trusted `arc=pass` can suppress the signal, but only under the caller's explicit opt-in: `arc=pass` alone proves only that an ARC chain is cryptographically intact — a direct spoofer can seal its own valid ARC set and make a verifier that stamps `arc=pass` for any valid chain emit one — so it is **not** treated as forwarding proof on its own, and with the opt-in off it never suppresses. Trust is resolved at rule time (via the same trust resolution the rest of the composite uses), so split-API callers that declare `trustedAuthservIds` at `runRules`/`runCompositeRules` time behave like `analyzeMessage`. Forge-able `List-*`/`Resent-*`/ARC-chain headers never suppress it. The only ways to suppress it are to actually authenticate the From domain or, under the opt-in, to present a trusted forwarding `arc=pass`. |
 | `composite.publicMailboxSpoofingCandidate` | medium | The visible From is a known **public mailbox provider** domain (`senderIdentity.fromDomainIsPublicMailboxProvider === true`), a trusted header evaluated the message, and **no** aligned authentication vouches for it (`anyAuthAligned === false`, no aligned trusted DMARC pass). | Borrowing a consumer-mailbox brand (`From: someone@outlook.com`) while sending from other infrastructure — the logged From `outlook.com` / Return-Path `icloud.com` / Message-ID `yahoo.co.jp` shape. These providers publish enforcing DMARC, so genuine mail always aligns; missing alignment is the tell *on its own*, without needing a second divergent identifier. A *candidate*, so medium — a forwarder that breaks both SPF and DKIM lands here too. Cannot be suppressed without real aligned auth, nor manufactured against honest mail (only trusted, passing results count). |
 | `composite.authenticatedDisplayNameSpoof` | medium | The message authenticates and aligns for its From (`anyAuthAligned === true`) **and** the display name addresses a different domain (`displayName.containsEmail && embeddedDomainMatchesFromDomain === false`). | Authenticated lookalike with a borrowed display name (`From: "security@paypal.com" <alerts@authed.example>`) — the case a pure auth/Junk filter waves through. The signal points at the attacker's own message, never the impersonated brand. |
 | `composite.unsecuredDeepSubdomainCandidate` | low | The visible From sits on a deep subdomain (`fromDomainParts.subdomainDepth >= 2`, PSL-derived), a trusted verifier reported `dmarc=none` for that From's organizational domain, and **no** aligned authentication vouches for it (`anyAuthAligned === false`, no aligned/org trusted SPF/DKIM or DMARC pass). | Disposable deep-subdomain impersonation (`From: …@sivakeso.support.sn5799.com`) — a readable, brand-ish hostname stacked under a cheap registrable domain with no enforced DMARC policy, where per-label randomness heuristics do not fire. `subdomainDepth` is populated by the built-in PSL resolver; pass `getRegistrableDomain: () => null` to disable. Cannot be suppressed without real aligned auth for the visible From's organizational domain, nor manufactured against honest mail. |
 | `composite.deepRandomFromSubdomain` | low | The visible From sits on a deep subdomain (`fromDomainParts.subdomainDepth >= 2`, PSL-derived), at least one **subdomain** label reads as random (`computeRandomLookingCandidate`), and **no** aligned authentication vouches for it. | Disposable *random* deep-subdomain impersonation (`From: …@a8f3qz.k2pls.cheapdomain.test`) — the random-label twin of `unsecuredDeepSubdomainCandidate`. Random labels and deep ESP structure are each individually noisy; the combination on the visible From with no aligned auth is the tell. Cannot be suppressed without real aligned auth for the From's organizational domain; needs a PSL resolver for the depth. |
+| `composite.deepServiceWordSubdomain` | low | The visible From sits on a deep subdomain (`fromDomainParts.subdomainDepth >= 2`, PSL-derived) stacking a readable **service word** (`isServiceWordLabel`: `accounts`, `events`, `updates`, `orders`, `system`, `form`, …) next to a **machine-generated** companion label (`computeRandomLookingCandidate`). DKIM alignment is recorded as context (`data.dkimAligned`), **not** a suppression. | Disposable *service-word* deep-subdomain impersonation (`From: …@accounts.k2m9x7.throwaway.test`) — the readable-service-word twin of `deepRandomFromSubdomain` that keeps firing when the attacker aligns DKIM on their own throwaway domain (issue #83). The suspicious shape (deep subdomain + service word + random companion) is still required, so ordinary aligned mail on an everyday domain does not fire; ubiquitous infra labels (`mail`, `secure`, …) are excluded from the vocabulary. Needs a PSL resolver for the depth. |
+| `composite.geoTokenCompoundDomain` | low | The visible From's **registrable** domain is a geo/token compound: a hyphenated throwaway label carrying a two-letter region token (`isGeoTokenCompoundLabel`), e.g. `official-zh-ayx.com`. DKIM alignment is recorded as context (`data.dkimAligned`), **not** a suppression. | Disposable geo-token compound domain (`From: …@official-zh-ayx.com`) that keeps firing when the attacker aligns DKIM on the domain they own (issue #83). Judges the registrable domain *shape*, so it does not make aligned mail broadly suspicious; legitimate two-part hyphenated brands (`coca-cola.com`, `t-mobile.com`) lack a bare region token and do not fire. Requires a trusted sender-auth check to have run. |
 | `composite.brandDivergencePhishing` | high | The From display name reads as a known **brand** the From domain does not belong to (`senderIdentity.brandInference.brandDomainMatchesFromDomain === false`). Reports the From's authentication posture in `data.fromAuthenticated`. | Borrowed-brand phishing (`From: "PayPal" <security@evil.test>`), the Layer-4 elevation of the base `displayName.brandDomainMismatch`. Requires an opt-in `brandCatalog`; the core bundles no brand list. Describes the sender's own message, never the impersonated brand's infrastructure, so it cannot frame a third party. |
 | `composite.ownDomainSpoofCandidate` | high | The visible From is one of the caller's **own account domains** (supplied via `options.context.accountDomains`) and **no** aligned authentication vouches for it. | Self-domain spoofing (`From: it-helpdesk@yourcompany.example`) impersonating an internal colleague/system. Mail genuinely from your own domain authenticates, so an unauthenticated own-domain From is a sharp tell on its own. Opt-in via caller context; cannot be suppressed without real aligned auth for the own domain. |
 | `composite.dkimFailWithAlignedPass` | info | A trusted `dkim=fail` co-occurs with an aligned, trusted, passing DKIM signature for the From (`anyAlignedDkimPass === true`). | **Mitigation.** A benign broken/extra signature (e.g. a list/forwarder signature failing alongside the author domain's valid one), so the DKIM failure is not an authentication gap. Gates on a *real* aligned DKIM pass only the From domain can produce, so it cannot mark a forged failure benign. |
@@ -654,6 +656,25 @@ The opt-in [`displayName.brandDomainMismatch`](#display-name-brand-domain-mismat
 rule turns `brandDomainMatchesFromDomain === false` into a `medium`-severity
 `consistency` signal.
 
+**Organizational-family domain matching (issue #84).** A brand's real sending
+domains often span a *family* of registrable domains and sub-brand subdomains — AWS
+sends from `amazon.com`, `aws.amazon.com`, and `email.aws.amazon.com`, all resolving
+to the `amazon.com` registrable domain. `brandDomainMatchesFromDomain` resolves
+**both** the From domain **and** each catalog domain through the PSL resolver, so a
+catalog listing `aws.amazon.com` still recognizes a legitimate `amazon.com` /
+`email.aws.amazon.com` From as belonging (`true`) rather than flagging it. A spoofer
+on `evil.test`, or a hyphenated look-alike such as `aws-security.com`, resolves to a
+different registrable domain and still reads as `false`. When no resolver is
+available the relationship stays `null` (unknown), never a false mismatch.
+
+**Short-brand fuzzy-match floor (`BRAND_MATCH_MIN_FUZZY_LENGTH`, issue #84).** On
+very short tokens the similarity metrics saturate — a 3-letter brand such as `aws`
+scores above both thresholds against unrelated words that merely end the same way
+(`jaws`, `laws`, `paws`). Fuzzy matching therefore requires **both** the token and
+the brand to be at least `BRAND_MATCH_MIN_FUZZY_LENGTH` (4) characters; shorter
+brands match only on **exact** spelling (`AWS` → `aws`), so acronym impersonation is
+still detected but a benign near-spelling an attacker could choose is not.
+
 **Guardrails — homoglyph and script safety.** Brand inference operates **only**
 on a pure-Latin display name. A name whose letters are entirely non-Latin
 (`山本太郎`) reports `non-latin-script`, and a **mixed-script** name — the
@@ -739,11 +760,31 @@ computeRandomLookingCandidate("crowdworks");// false — short consonant run, no
 ```
 
 The thresholds are deliberately tuned so known false-positive brand/word labels from
-the add-on's history (`switchbot`, `crowdworks`, and similar low-vowel but
+the add-on's history (`switchbot`, `crowdworks`, `anthropic`, and similar low-vowel but
 pronounceable words) read `false`, while spam-style random labels read `true`. Like
 every helper here it is a **candidate flag, not a verdict** — the caller decides
 whether a random-looking token matters in its context, since legitimate DKIM
 selectors, hashes, and ESP labels also look random.
+
+#### Pronounceability guard (`computePronounceability` / `isLikelyNaturalToken`)
+
+The low-vowel / consonant-run branch above is the only structural branch that keys on
+word *shape* rather than on a machine-generated marker, so it is the one that can
+misfire on a readable but vowel-poor label. `computeRandomLookingCandidate` gates that
+branch on `computePronounceability`, a **data-free** structural check that recognizes
+the syllable shape of a pronounceable word (a short longest consonant cluster plus a
+vowel ratio above a floor). A token with genuine syllable structure is therefore never
+flagged on shape alone — this is the false-positive guard for readable brand-like
+labels. The digit/hex/alternation/uppercase branches are intentionally *not* guarded:
+those shapes read as generated regardless of pronounceability.
+
+```ts
+import { computePronounceability } from "mail-auth-signal";
+
+computePronounceability("anthropic").looksPronounceable;  // true  — "nthr" cluster = 4
+computePronounceability("crowdworks").looksPronounceable; // true  — clusters ≤ 3
+computePronounceability("mpqxyt").looksPronounceable;     // false — no vowel
+```
 
 **One add-on-positive class needs a corpus.** A structurally word-like gibberish label
 such as `wlikqkgi` (vowel ratio `0.25`, longest consonant run `4`) is *indistinguishable
@@ -761,6 +802,23 @@ computeRandomLookingCandidate("wlikqkgi", { isNatural });  // true  — model re
 computeRandomLookingCandidate("switchbot", { isNatural }); // false — model accepts it
 ```
 
+A caller that does **not** want to maintain a corpus can pass the data-free
+`isLikelyNaturalToken` (backed by `computePronounceability`) as `isNatural`. It accepts
+any pronounceable token, so a crude word list that has never seen a real brand word no
+longer turns it into a candidate — the exact `anthropic` / `crowdworks` false positive
+this guard targets — while genuinely unpronounceable generated labels still read `true`.
+The tradeoff is intended: because it judges shape alone, word-like gibberish (`wlikqkgi`)
+also reads natural, so a caller that must catch that residual class should supply its own
+corpus-backed predicate instead.
+
+```ts
+import { isLikelyNaturalToken } from "mail-auth-signal";
+
+computeRandomLookingCandidate("anthropic",  { isNatural: isLikelyNaturalToken }); // false
+computeRandomLookingCandidate("crowdworks", { isNatural: isLikelyNaturalToken }); // false
+computeRandomLookingCandidate("x9z8q2w1",   { isNatural: isLikelyNaturalToken }); // true
+```
+
 **Use and limitations.** These are weak, policy-neutral hints, not verdicts — a
 high-entropy or vowel-poor token is only suspicious in a context the caller
 supplies (legitimate DKIM selectors, hashes, and ESP subdomains all look
@@ -772,13 +830,15 @@ bundle). Floating-point fields are rounded to 4 decimals so fixtures and
 cross-language ports compare exactly.
 
 **No bundled data.** Every value is computed from the token alone — no word list,
-brand dictionary, language corpus, or n-gram table. Bigram/trigram "naturalness"
-was considered and **deliberately left caller-owned**: a meaningful naturalness score
-needs a language-frequency dataset, and bundling one would cross the data/license
-boundary this package keeps clear (see `NOTICE`). It is the one Layer 3
-heuristic the library does not compute itself; instead `computeRandomLookingCandidate`
-accepts the caller's model through `options.isNatural` (above) so a caller with its own
-licensed corpus reaches full add-on parity without the library shipping the corpus.
+brand dictionary, language corpus, or n-gram table. *Corpus-based* bigram/trigram
+"naturalness" (a language-frequency score) was considered and **deliberately left
+caller-owned**: bundling a frequency dataset would cross the data/license boundary
+this package keeps clear (see `NOTICE`), so `computeRandomLookingCandidate` accepts the
+caller's model through `options.isNatural` (above) for callers with their own licensed
+corpus. The library does compute a **data-free** structural stand-in,
+`computePronounceability` / `isLikelyNaturalToken` (above): it recognizes the syllable
+*shape* of a pronounceable word without any frequency data, which is enough to guard
+the readable brand-like false positives while staying inside the license boundary.
 
 ## Jaro-Winkler string similarity
 

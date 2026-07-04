@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { analyzeMessage, defaultGetRegistrableDomain, extractMetrics } from "../src/index.js";
+import { isUnderPrivateSuffix } from "../src/psl.js";
+
+describe("isUnderPrivateSuffix — shared/private hosting suffix detection", () => {
+  it("flags a host under a PSL private hosting suffix", () => {
+    // s3.amazonaws.com is a delegated-hosting (private) suffix, so the host below it
+    // is more specific than its ICANN registrable domain (amazonaws.com).
+    expect(isUnderPrivateSuffix("brand.s3.amazonaws.com")).toBe(true);
+    expect(isUnderPrivateSuffix("attacker.s3.amazonaws.com")).toBe(true);
+  });
+
+  it("does not flag an ordinary brand subdomain on an ICANN registrable domain", () => {
+    // aws.amazon.com resolves to amazon.com under both ICANN-only and private-aware
+    // resolution — it is not under a delegated-hosting suffix.
+    expect(isUnderPrivateSuffix("aws.amazon.com")).toBe(false);
+    expect(isUnderPrivateSuffix("amazon.com")).toBe(false);
+    expect(isUnderPrivateSuffix("mail.paypal.com")).toBe(false);
+  });
+});
 
 describe("built-in PSL resolver — default behavior (no caller setup required)", () => {
   it("populates registrableDomain and subdomainDepth for a .co.jp compound suffix", () => {

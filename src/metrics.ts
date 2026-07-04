@@ -339,6 +339,19 @@ export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies):
   // an explicit caller-supplied resolver in deps.
   const senderIdentity = computeSenderIdentity(fromValue, fromDomain, messageIdDomain, deps);
 
+  const LIST_HEADER_NAMES = [
+    "list-id",
+    "list-unsubscribe",
+    "list-subscribe",
+    "list-post",
+    "list-archive",
+    "list-help",
+    "list-owner",
+  ] as const;
+  const hasListHeaders = LIST_HEADER_NAMES.some(
+    (name) => getFirstHeaderValue(headers, name) !== null,
+  );
+
   return {
     fromDomain,
     senderDomain,
@@ -363,5 +376,6 @@ export function extractMetrics(input: AnalyzeInput, deps?: MetricsDependencies):
     authentication,
     senderIdentity,
     authenticationResults,
+    hasListHeaders,
   };
 }

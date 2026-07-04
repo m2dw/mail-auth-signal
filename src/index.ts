@@ -5,6 +5,7 @@ export { computeJaccard } from "./jaccard.js";
 export {
   BRAND_LIKE_MIN_LETTERS,
   BRAND_LIKE_MIN_LETTER_RATIO,
+  BRAND_MATCH_MIN_FUZZY_LENGTH,
   BRAND_MATCH_MIN_JACCARD,
   BRAND_MATCH_MIN_JARO_WINKLER,
   computeDisplayNameBrandInference,
@@ -13,12 +14,25 @@ export {
 } from "./brandInference.js";
 export { collectAuthenticationAlignment, extractMetrics } from "./metrics.js";
 export {
+  COMMON_WORD_GEO_TOKENS,
+  GEO_COMPOUND_TOKENS,
+  SERVICE_WORD_SUBDOMAIN_LABELS,
+  hyphenSegments,
+  isCommonWordGeoToken,
+  isGeoCompoundToken,
+  isGeoTokenCompoundLabel,
+  isServiceWordLabel,
+  registrableLabelOf,
+} from "./domainShape.js";
+export {
   computeDisplayNameWhitespace,
   computeDomainParts,
   computeLexicalHeuristics,
   computeLexicalStats,
+  computePronounceability,
   computeRandomLookingCandidate,
   computeSenderIdentity,
+  isLikelyNaturalToken,
 } from "./senderIdentity.js";
 export type { RandomLookingOptions } from "./senderIdentity.js";
 export {
@@ -62,15 +76,19 @@ export {
   defaultCompositeRules,
   runCompositeRules,
   unauthenticatedFromSpoofRule,
+  ARC_TRUSTED_FORWARDING_CONTEXT_KEY,
   publicMailboxSpoofingCandidateRule,
   authenticatedDisplayNameSpoofRule,
   unsecuredDeepSubdomainCandidateRule,
   deepRandomFromSubdomainRule,
+  deepServiceWordSubdomainRule,
+  geoTokenCompoundDomainRule,
   brandDivergencePhishingRule,
   ownDomainSpoofCandidateRule,
   OWN_ACCOUNT_DOMAINS_CONTEXT_KEY,
   dkimFailWithAlignedPassRule,
   dkimAlignedLexicalMitigationRule,
+  delegatedDkimAlignedRouteConsistentRule,
   alignedAuthenticationConfirmedRule,
 } from "./rules/composite/index.js";
 export type {
@@ -101,6 +119,7 @@ export type {
   MessageMetrics,
   MetricsDependencies,
   OrganizationalAlignment,
+  Pronounceability,
   PublicMailboxProvider,
   SenderIdentityMetrics,
   SpfResult,

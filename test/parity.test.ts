@@ -68,6 +68,7 @@ const fixtures: ParityFixture[] = [
 /** Every metric key extractMetrics produces; a fixture must pin all of them. */
 const METRIC_KEYS: readonly string[] = [
   "fromDomain",
+  "hasListHeaders",
   "senderDomain",
   "senderDomainMatchesFromDomain",
   "senderDomainRegistrableMatchesFromDomain",

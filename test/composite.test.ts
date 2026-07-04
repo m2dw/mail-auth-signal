@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   alignedAuthenticationConfirmedRule,
   analyzeMessage,
+  ARC_TRUSTED_FORWARDING_CONTEXT_KEY,
   authenticatedDisplayNameSpoofRule,
   defaultCompositeRules,
   defaultRules,
+  delegatedDkimAlignedRouteConsistentRule,
   extractMetrics,
   runCompositeRules,
   runRules,
@@ -366,6 +368,127 @@ describe("composite.unauthenticatedFromSpoof", () => {
     // The untrusted smtp.mailfrom mismatch is likewise excluded.
     expect(contributing).not.toContain("smtpMailfrom.domainMismatch");
   });
+
+  // Forwarding / list guardrail (issue #86). Legitimate forwarding reproduces the
+  // "no aligned auth + divergent envelope" shape; a rule-time-trusted ARC pass
+  // suppresses it, but only when the caller has opted into the ARC forwarding-trust
+  // policy (arc=pass alone is attacker-sealable and proves only chain integrity).
+  const forwardHeaders = {
+    from: "Example <notice@example.com>",
+    "message-id": "<id@example.com>",
+    "return-path": "<bounce@forwarder.test>",
+    "authentication-results": `${TRUSTED_ID}; arc=pass; spf=fail smtp.mailfrom=forwarder.test; dkim=fail header.d=example.com`,
+  };
+  const arcForwardingOptions = {
+    trustedAuthservIds: [TRUSTED_ID],
+    context: { [ARC_TRUSTED_FORWARDING_CONTEXT_KEY]: true },
+  };
+
+  it("suppresses on a trusted ARC pass when the caller opts into ARC forwarding trust", () => {
+    // Rakumail/docomo-style forward: the visible From is the untouched author
+    // (example.com), the relay rewrote the envelope (Return-Path / smtp.mailfrom now
+    // name the forwarder) so SPF fails and nothing aligns — exactly the spoof shape —
+    // but the recipient's trusted verifier validated the ARC chain (arc=pass) and the
+    // caller has declared that its trusted arc=pass means validated trusted forwarding.
+    const result = analyzeWithComposites({
+      headers: forwardHeaders,
+      options: arcForwardingOptions,
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).not.toContain("composite.unauthenticatedFromSpoof");
+
+    // Drop only the arc=pass and the very same message fires — proving the
+    // suppression is ARC-driven, not an accident of the other headers.
+    const withoutArc = analyzeWithComposites({
+      headers: {
+        ...forwardHeaders,
+        "authentication-results": `${TRUSTED_ID}; spf=fail smtp.mailfrom=forwarder.test; dkim=fail header.d=example.com`,
+      },
+      options: arcForwardingOptions,
+    });
+    expect(
+      compositeSignals(withoutArc.signals).map((s) => s.key),
+    ).toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("does not suppress on a trusted ARC pass without the caller's opt-in (arc=pass is attacker-sealable)", () => {
+    // Same trusted arc=pass, but the caller has NOT opted into the ARC
+    // forwarding-trust policy. Because a direct spoofer can seal its own valid ARC
+    // set and make a trusted verifier stamp arc=pass, an unconditional suppression
+    // would be a one-header bypass — so the direct spoof must still fire.
+    const result = analyzeWithComposites({
+      headers: forwardHeaders,
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(result.metrics.authentication.anyAuthAligned).toBe(false);
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("does not suppress on an untrusted ARC pass (attacker-forged forwarding claim)", () => {
+    // The arc=pass is asserted by an untrusted relay the attacker controls, not by
+    // the recipient's trusted verifier. It must not buy a bypass, so the direct spoof
+    // still fires.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<id@example.com>",
+        "return-path": "<bounce@evil.test>",
+        "authentication-results": [
+          `${TRUSTED_ID}; spf=fail smtp.mailfrom=evil.test; dkim=fail header.d=evil.test`,
+          "relay.evil.test; arc=pass",
+        ],
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    expect(
+      compositeSignals(result.signals).map((s) => s.key),
+    ).toContain("composite.unauthenticatedFromSpoof");
+  });
+
+  it("does not suppress on forge-able List / Resent headers alone", () => {
+    // List-Id and Resent-* are free-text headers an attacker can staple onto a spoof.
+    // Without a trusted arc=pass they must not suppress the signal — otherwise any
+    // spoofer gets a one-header bypass.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<spoof@evil.test>",
+        "return-path": "<bounce@evil.test>",
+        "list-id": "Newsletter <news.example.com>",
+        "list-unsubscribe": "<mailto:unsub@evil.test>",
+        "resent-from": "Forwarder <fwd@forwarder.test>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=evil.test; dkim=fail header.d=evil.test`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    const signal = compositeSignals(result.signals).find(
+      (s) => s.key === "composite.unauthenticatedFromSpoof",
+    );
+    expect(signal).toBeDefined();
+    expect(signal?.severity).toBe("high");
+  });
+
+  it("absence of forwarding evidence does not suppress the direct spoof", () => {
+    // No List/ARC/Resent context at all: the guard must be inert and the direct
+    // unauthenticated From spoof must still fire at high severity.
+    const result = analyzeWithComposites({
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<spoof@evil.test>",
+        "return-path": "<bounce@evil.test>",
+        "authentication-results": `${TRUSTED_ID}; dmarc=fail header.from=example.com; spf=fail smtp.mailfrom=evil.test; dkim=fail header.d=evil.test`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    });
+    const signal = compositeSignals(result.signals).find(
+      (s) => s.key === "composite.unauthenticatedFromSpoof",
+    );
+    expect(signal?.severity).toBe("high");
+  });
 });
 
 describe("composite.authenticatedDisplayNameSpoof", () => {
@@ -649,6 +772,88 @@ describe("runCompositeRules — separated API and trust recomputation", () => {
     });
     expect(composite.map((s) => s.key)).not.toContain("composite.unauthenticatedFromSpoof");
   });
+
+  // The ARC forwarding guard must resolve trust the same rule-time way the rest of
+  // the composite does. messageScopedMetrics recomputes metrics.authentication for
+  // rule-time trust but does NOT rewrite metrics.authenticationResults[].trusted, so
+  // a guard reading the stale extraction-time flag would disagree with analyzeMessage
+  // through the split API.
+  const arcForwardInput: AnalyzeInput = {
+    headers: {
+      from: "Example <notice@example.com>",
+      "message-id": "<id@example.com>",
+      "return-path": "<bounce@forwarder.test>",
+      "authentication-results": `${TRUSTED_ID}; arc=pass; spf=fail smtp.mailfrom=forwarder.test; dkim=fail header.d=example.com`,
+    },
+  };
+
+  it("resolves ARC forwarding trust at rule time, not from the extracted header.trusted flag", () => {
+    // Extract without declaring trust: every header gets trusted=false baked in.
+    const metrics = extractMetrics(arcForwardInput);
+    expect(metrics.authenticationResults.every((h) => h.trusted === false)).toBe(true);
+
+    // Declare trust and the ARC opt-in at rule time. Even though the extracted
+    // header.trusted is stale (false), the guard resolves trust from the rule-time
+    // options and suppresses, matching analyzeMessage.
+    const ruleTimeOptions = {
+      trustedAuthservIds: [TRUSTED_ID],
+      context: { [ARC_TRUSTED_FORWARDING_CONTEXT_KEY]: true },
+    };
+    const baseSignals = runRules(metrics, ruleTimeOptions);
+    const composite = runCompositeRules(metrics, baseSignals, ruleTimeOptions);
+    expect(composite.map((s) => s.key)).not.toContain("composite.unauthenticatedFromSpoof");
+
+    const viaAnalyze = analyzeMessage(
+      { ...arcForwardInput, options: ruleTimeOptions },
+      defaultRules,
+      undefined,
+      defaultCompositeRules,
+    );
+    expect(compositeSignals(viaAnalyze.signals)).toEqual(composite);
+  });
+
+  it("does not let a stale extracted trusted flag activate the ARC guard when that id is untrusted at rule time", () => {
+    // Two AR headers: an ARC-bearing header from "arc.example" and a sender-auth
+    // header from TRUSTED_ID whose trusted, passing/failing SPF supplies the spoof
+    // basis. Extraction trusts both, so arc.example's header.trusted is baked true.
+    const splitInput: AnalyzeInput = {
+      headers: {
+        from: "Example <notice@example.com>",
+        "message-id": "<id@example.com>",
+        "return-path": "<bounce@forwarder.test>",
+        "authentication-results": [
+          "arc.example; arc=pass",
+          `${TRUSTED_ID}; spf=fail smtp.mailfrom=forwarder.test; dkim=fail header.d=example.com`,
+        ],
+      },
+    };
+    const metrics = extractMetrics({
+      ...splitInput,
+      options: { trustedAuthservIds: ["arc.example", TRUSTED_ID] },
+    });
+    const arcHeader = metrics.authenticationResults.find((h) => h.authservId === "arc.example");
+    expect(arcHeader?.trusted).toBe(true);
+
+    // At rule time only TRUSTED_ID is trusted — arc.example is dropped — while the
+    // caller opts into ARC forwarding trust. The ARC-bearing header is no longer
+    // trusted for this evaluation, so the stale baked flag must not activate the
+    // guard: the spoof still fires. (A guard reading header.trusted would suppress.)
+    const ruleTimeOptions = {
+      trustedAuthservIds: [TRUSTED_ID],
+      context: { [ARC_TRUSTED_FORWARDING_CONTEXT_KEY]: true },
+    };
+    const baseSignals = runRules(metrics, ruleTimeOptions);
+    const composite = runCompositeRules(metrics, baseSignals, ruleTimeOptions);
+    expect(composite.map((s) => s.key)).toContain("composite.unauthenticatedFromSpoof");
+
+    const viaAnalyze = analyzeMessage(
+      { ...splitInput, options: ruleTimeOptions },
+      defaultRules,
+      undefined,
+      defaultCompositeRules,
+    );
+    expect(compositeSignals(viaAnalyze.signals)).toEqual(composite);
+  });
 });
 
 describe("composite rules in isolation", () => {
@@ -660,6 +865,138 @@ describe("composite rules in isolation", () => {
     expect(alignedAuthenticationConfirmedRule.key).toBe(
       "composite.alignedAuthenticationConfirmed",
     );
+    expect(delegatedDkimAlignedRouteConsistentRule.key).toBe(
+      "composite.delegatedDkimAlignedRouteConsistent",
+    );
+  });
+});
+
+describe("composite.delegatedDkimAlignedRouteConsistent", () => {
+  // Shared base: From-aligned DKIM pass, delegated ESP envelope (smtp.mailfrom
+  // is the ESP's domain, not the From domain), route-consistent Message-ID.
+  const ESP_DOMAIN = "esp.example.net";
+  const FROM_DOMAIN = "newsletter.example.com";
+
+  function makeInput(extra: Record<string, string>): AnalyzeInput {
+    return {
+      headers: {
+        from: `Sender <news@${FROM_DOMAIN}>`,
+        "message-id": `<abc123@${ESP_DOMAIN}>`,
+        "authentication-results": `${TRUSTED_ID}; dkim=pass header.d=${FROM_DOMAIN}; spf=pass smtp.mailfrom=bounce@${ESP_DOMAIN}`,
+        ...extra,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+  }
+
+  it("fires info for a legitimate delegated newsletter with List headers", () => {
+    const input = makeInput({ "list-id": `<news.${FROM_DOMAIN}>` });
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("fires for List-Unsubscribe as well", () => {
+    const input = makeInput({ "list-unsubscribe": `<https://esp.example.net/unsub>` });
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("stays silent without List headers — disposable-domain abuse surface", () => {
+    // Same routing pattern but no list headers → should NOT fire.
+    const input = makeInput({});
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).not.toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("stays silent when smtp.mailfrom matches From domain (no delegation)", () => {
+    // No SPF mismatch → not a delegated sender pattern.
+    const input: AnalyzeInput = {
+      headers: {
+        from: `Sender <news@${FROM_DOMAIN}>`,
+        "message-id": `<abc123@${FROM_DOMAIN}>`,
+        "authentication-results": `${TRUSTED_ID}; dkim=pass header.d=${FROM_DOMAIN}; spf=pass smtp.mailfrom=bounce@${FROM_DOMAIN}`,
+        "list-id": `<news.${FROM_DOMAIN}>`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).not.toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("stays silent when trusted-pass SPF matches From even if a failed SPF line creates an apparent mismatch", () => {
+    // The authenticated (trusted, passing) SPF smtp.mailfrom is the From domain,
+    // meaning there is no real delegation. A failed SPF record with a different
+    // domain would make smtpMailfromDomainMatchesFromDomain=false, which must not
+    // be enough to trigger the mitigation.
+    const input: AnalyzeInput = {
+      headers: {
+        from: `Sender <news@${FROM_DOMAIN}>`,
+        "message-id": `<abc123@${ESP_DOMAIN}>`,
+        "authentication-results": [
+          `${TRUSTED_ID}; spf=pass smtp.mailfrom=bounce@${FROM_DOMAIN}; dkim=pass header.d=${FROM_DOMAIN}`,
+          `${TRUSTED_ID}; spf=fail smtp.mailfrom=bounce@${ESP_DOMAIN}`,
+        ].join("\r\n\t"),
+        "list-id": `<news.${FROM_DOMAIN}>`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).not.toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("stays silent without aligned DKIM pass", () => {
+    // DKIM fails → no cryptographic evidence of From-domain authority.
+    const input: AnalyzeInput = {
+      headers: {
+        from: `Sender <news@${FROM_DOMAIN}>`,
+        "message-id": `<abc123@${ESP_DOMAIN}>`,
+        "authentication-results": `${TRUSTED_ID}; dkim=fail header.d=${FROM_DOMAIN}; spf=pass smtp.mailfrom=bounce@${ESP_DOMAIN}`,
+        "list-id": `<news.${FROM_DOMAIN}>`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).not.toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("stays silent when Message-ID domain is unrelated to smtp.mailfrom", () => {
+    // Message-ID from a third domain → route inconsistency → no mitigation.
+    const input: AnalyzeInput = {
+      headers: {
+        from: `Sender <news@${FROM_DOMAIN}>`,
+        "message-id": `<abc123@unrelated.example.org>`,
+        "authentication-results": `${TRUSTED_ID}; dkim=pass header.d=${FROM_DOMAIN}; spf=pass smtp.mailfrom=bounce@${ESP_DOMAIN}`,
+        "list-id": `<news.${FROM_DOMAIN}>`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).not.toContain("composite.delegatedDkimAlignedRouteConsistent");
+  });
+
+  it("spam-like self-signed route-consistent mail cannot obtain the mitigation without List headers", () => {
+    // A disposable-domain spammer controls spam.test, produces aligned DKIM, and
+    // stamps a matching Message-ID — but sends no list headers.
+    const input: AnalyzeInput = {
+      headers: {
+        from: `Sender <info@spam.test>`,
+        "message-id": `<xyz@spam.test>`,
+        "authentication-results": `${TRUSTED_ID}; dkim=pass header.d=spam.test; spf=pass smtp.mailfrom=bounce@spam-infra.test`,
+      },
+      options: { trustedAuthservIds: [TRUSTED_ID] },
+    };
+    // smtp.mailfrom matches From (no mismatch) → silent for that reason too,
+    // but the key point is the List header guard.
+    const result = analyzeWithComposites(input);
+    const keys = compositeSignals(result.signals).map((s) => s.key);
+    expect(keys).not.toContain("composite.delegatedDkimAlignedRouteConsistent");
   });
 });
 
