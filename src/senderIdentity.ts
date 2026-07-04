@@ -17,6 +17,7 @@ import type {
   LexicalHeuristics,
   LexicalStats,
   MetricsDependencies,
+  Pronounceability,
   SenderIdentityMetrics,
 } from "./types.js";
 
@@ -221,6 +222,135 @@ export function computeLexicalHeuristics(value: string): LexicalHeuristics {
   };
 }
 
+/**
+ * Structural gates for computePronounceability, tuned against the readable
+ * brand-like labels that made naive vowel/consonant-run rules misfire.
+ *
+ *   - maxConsonantCluster <= 4: a natural word breaks its consonants with vowels,
+ *     so its longest cluster stays short. `anthropic` ("nthr" = 4) and `switchbot`
+ *     ("tchb" = 4) sit right at the ceiling; `crowdworks` ("wdw" = 3) is under it,
+ *     while `mpqxyt` (6) and `qwrtplkjhg` (10) blow past it.
+ *   - vowelRatio >= 0.2: even a consonant-heavy word keeps roughly one vowel per
+ *     five letters. `crowdworks` is exactly at the floor (2 / 10); vowel-starved
+ *     runs such as `mpqxyt` (0) and alphabet-style strings such as `bcdefgh`
+ *     (1 / 7 ≈ 0.14) fall below it. Set equal to RANDOM_LOOKING_MAX_VOWEL_RATIO so
+ *     the "pronounceable" and "low-vowel random" bands meet without a gap.
+ *
+ * A token must also carry at least one vowel; a vowel-free run can never be
+ * pronounceable regardless of its cluster length.
+ */
+const PRONOUNCEABLE_MAX_CONSONANT_CLUSTER = 4;
+const PRONOUNCEABLE_MIN_VOWEL_RATIO = 0.2;
+
+/**
+ * Compute the data-free structural pronounceability of a token (see
+ * Pronounceability), the false-positive guard for the random-looking heuristics.
+ *
+ * Like every helper in this module it consults **no** bundled word list, brand
+ * dictionary, language corpus, or n-gram table — only the token's own shape. It
+ * measures the syllable structure a naive vowel/consonant-run rule ignores: a
+ * pronounceable word interleaves vowels and consonants so its consonant clusters
+ * stay short and its vowels recur, whereas a generated label piles consonants into
+ * long, vowel-starved runs. Classification is ASCII-only and `y` counts as a
+ * consonant (treating it as a vowel would let more gibberish read as pronounceable).
+ *
+ * This is deliberately one-sided: it recognizes a pronounceable *shape* to
+ * *suppress* a false random-looking verdict, and it never asserts a token is
+ * gibberish. A structurally word-like token it cannot separate from a real word
+ * (e.g. `wlikqkgi`, indistinguishable by shape from `switchbot`) still reads
+ * pronounceable here — the guard errs toward not flagging, leaving that residual
+ * class to a caller's own corpus (see computeRandomLookingCandidate / isNatural).
+ */
+export function computePronounceability(value: string): Pronounceability {
+  let alphaLength = 0;
+  let vowelCount = 0;
+  let syllableEstimate = 0;
+  let inVowelGroup = false;
+  let consonantCluster = 0;
+  let maxConsonantCluster = 0;
+
+  for (const char of value) {
+    if (!isAsciiLetter(char)) {
+      // A non-letter (digit, hyphen, non-ASCII codepoint) breaks a consonant
+      // cluster and ends any vowel group, exactly like maxConsonantRun.
+      consonantCluster = 0;
+      inVowelGroup = false;
+      continue;
+    }
+    alphaLength++;
+    if (ASCII_VOWELS.has(char.toLowerCase())) {
+      vowelCount++;
+      consonantCluster = 0;
+      // Count one syllable per maximal run of adjacent vowels.
+      if (!inVowelGroup) {
+        syllableEstimate++;
+        inVowelGroup = true;
+      }
+    } else {
+      // `y` is classified as a consonant here (conservative — see the doc comment).
+      inVowelGroup = false;
+      consonantCluster++;
+      if (consonantCluster > maxConsonantCluster) maxConsonantCluster = consonantCluster;
+    }
+  }
+
+  const vowelRatio = alphaLength > 0 ? round4(vowelCount / alphaLength) : 0;
+  const looksPronounceable =
+    alphaLength > 0 &&
+    vowelCount > 0 &&
+    maxConsonantCluster <= PRONOUNCEABLE_MAX_CONSONANT_CLUSTER &&
+    vowelRatio >= PRONOUNCEABLE_MIN_VOWEL_RATIO;
+
+  return {
+    alphaLength,
+    vowelCount,
+    vowelRatio,
+    syllableEstimate,
+    maxConsonantCluster,
+    looksPronounceable,
+  };
+}
+
+/**
+ * A conservative, data-free naturalness predicate suitable for passing directly as
+ * RandomLookingOptions.isNatural. Backed by computePronounceability, it treats a
+ * token as "natural" when it has the syllable shape of a pronounceable word.
+ *
+ * It exists so a caller can close the corpus-dependent gap in
+ * computeRandomLookingCandidate *without* maintaining a word list or bigram model
+ * that would mis-reject readable brand-like labels — the exact false positive
+ * (`anthropic`, `crowdworks`) this guard targets. A crude model that has never
+ * seen "anthropic" rejects it and turns it into a random-looking candidate;
+ * isLikelyNaturalToken accepts any pronounceable token, so those labels stay
+ * unflagged while genuinely unpronounceable generated labels still read random.
+ *
+ * The tradeoff is intended: because pronounceability is judged by shape alone, a
+ * word-like gibberish label such as `wlikqkgi` also reads natural here, so a
+ * caller that must catch that residual class should supply its own corpus-backed
+ * predicate instead. This one favors *not* flagging readable labels.
+ *
+ * It applies the same y-as-vowel guard as computeRandomLookingCandidate's low-vowel
+ * branch. computePronounceability counts `y` as a consonant, so a readable label
+ * where `y` does a vowel's work (`crypto`, `python`, `system`, `strychnine`) exceeds
+ * its consonant-cluster ceiling and reads unpronounceable. Left uncorrected, a caller
+ * that followed the docs and passed this helper as isNatural would see those labels
+ * re-flagged on the corpus branch — the very class the structural y-guard exempts by
+ * default. So a token the plain pronounceability check rejects is still accepted when,
+ * exactly as in that guard, it carries a real A/E/I/O/U vowel and reading `y` as a
+ * vowel leaves its remaining consonant run short (<= RANDOM_LOOKING_Y_VOWEL_MAX_RUN).
+ * A vowel-free label (`yyyyyy`, `mpqxyt`) reads `y` as a vowel only by absence of any
+ * other and is not rescued.
+ */
+export function isLikelyNaturalToken(token: string): boolean {
+  const pronounceability = computePronounceability(token);
+  if (pronounceability.looksPronounceable) return true;
+  // Mirror the detector's y-as-vowel guard so the two agree on this word class.
+  return (
+    pronounceability.vowelCount > 0 &&
+    maxConsonantRunTreatingYAsVowel(token) <= RANDOM_LOOKING_Y_VOWEL_MAX_RUN
+  );
+}
+
 /** Matches a single Latin-script codepoint (excludes ASCII — checked separately). */
 const LATIN_SCRIPT_RE = /\p{Script=Latin}/u;
 
@@ -300,9 +430,21 @@ function computeLatinFolding(text: string): {
  * short all-consonant labels such as `mpqxyt` (length 6, vowel ratio 0, consonant
  * run 6). Tuned so that known false-positive brand/word labels from the add-on's
  * history (`switchbot`, `crowdworks`, and similar low-vowel but pronounceable
- * words) still read false: those have a short-to-moderate consonant run, a vowel
- * ratio above the floor, no digits, no hex run, and no letter/digit alternation,
- * so none of the structural branches fire.
+ * words) still read false: those keep a vowel ratio at or above the floor and a
+ * consonant run no longer than a pronounceable word's, no digits, no hex run, and
+ * no letter/digit alternation, so none of the structural branches fire.
+ *
+ * RANDOM_LOOKING_MIN_CONSONANT_RUN is 5 — one past the longest consonant cluster a
+ * pronounceable word is allowed (PRONOUNCEABLE_MAX_CONSONANT_CLUSTER, 4). A run of
+ * exactly 4 is not a reliable random-looking marker on its own: readable words
+ * carry run-4 clusters with a low A/E/I/O/U ratio (`strength`: `ngth`, vowel ratio
+ * 1/8; `blindspots`: `ndsp`, vowel ratio 0.2), and no purely structural test
+ * separates them from a generated run-4 label — computePronounceability cannot
+ * rescue `strength` either, since its 0.2 vowel floor rejects the word as well.
+ * Requiring run >= 5 keeps those readable labels out of the low-vowel branch
+ * entirely (matching the add-on's own >= 5 threshold), while `mpqxyt` (run 6) and
+ * `qwrtplkjhg` (run 10) still trip it. Word-shaped run-4 gibberish is instead left
+ * to the caller's corpus branch (see RandomLookingOptions.isNatural).
  */
 const RANDOM_LOOKING_MIN_LENGTH = 6;
 const RANDOM_LOOKING_MIN_DIGIT_RATIO = 0.4;
@@ -310,6 +452,43 @@ const RANDOM_LOOKING_MIN_LETTER_DIGIT_TRANSITIONS = 4;
 const RANDOM_LOOKING_MIN_HEX_RUN = 8;
 const RANDOM_LOOKING_MAX_VOWEL_RATIO = 0.2;
 const RANDOM_LOOKING_MIN_CONSONANT_RUN = 5;
+
+/**
+ * Ceiling on the non-`y` consonant run that still lets the low-vowel branch's
+ * y-guard read `y` as the label's vowel. A genuine y-as-vowel word keeps its other
+ * consonant clusters short — `crypto` (`cr`/`pt` = 2) and `strychnine` (`str`/`chn`
+ * = 3) sit at or below 3 — so the run only reached RANDOM_LOOKING_MIN_CONSONANT_RUN
+ * because `y` was counted inside it. A label whose non-`y` consonants still cluster
+ * to 4 or more (`mpqxyta`: `mpqx`) is not pronounceable no matter how `y` is read, so
+ * a single `y` must not rescue it. Set at RANDOM_LOOKING_MIN_CONSONANT_RUN - 2.
+ */
+const RANDOM_LOOKING_Y_VOWEL_MAX_RUN = RANDOM_LOOKING_MIN_CONSONANT_RUN - 2;
+
+/**
+ * Longest run of consecutive consonants when `y` is read as a vowel (so it breaks a
+ * run rather than extending it), mirroring maxConsonantRun's treatment of vowels
+ * and non-letters. Used only by the random-looking y-guard to tell a label whose
+ * consonant run only reaches the floor because `y` sits inside it (`crypto`,
+ * `strychnine`) from one with a genuinely long non-`y` cluster (`mpqxyta`: `mpqx` = 4).
+ */
+function maxConsonantRunTreatingYAsVowel(value: string): number {
+  let run = 0;
+  let max = 0;
+  for (const char of value) {
+    if (!isAsciiLetter(char)) {
+      run = 0;
+      continue;
+    }
+    const lower = char.toLowerCase();
+    if (ASCII_VOWELS.has(lower) || lower === "y") {
+      run = 0;
+    } else {
+      run++;
+      if (run > max) max = run;
+    }
+  }
+  return max;
+}
 
 /** Whether every character is an ASCII uppercase letter (A-Z). False for "". */
 function isAllAsciiUppercaseLetters(value: string): boolean {
@@ -336,6 +515,13 @@ function isAllAsciiUppercaseLetters(value: string): boolean {
  *   When supplied, an all-ASCII-letter token the model rejects is also flagged, so
  *   a caller holding its own corpus reaches full add-on parity; when omitted, the
  *   helper stays purely structural and such tokens read false.
+ *
+ *   A caller that does *not* want to maintain a corpus can pass the data-free
+ *   isLikelyNaturalToken here: it accepts any pronounceable token, which keeps
+ *   readable brand-like labels (`anthropic`, `crowdworks`) from being flagged by a
+ *   crude word list that has never seen them — the false positive this guard
+ *   targets — at the cost of also accepting word-shaped gibberish (see
+ *   isLikelyNaturalToken).
  */
 export type RandomLookingOptions = {
   isNatural?: (token: string) => boolean;
@@ -353,8 +539,13 @@ export type RandomLookingOptions = {
  *   - a high digit ratio (a numeric-heavy identifier),
  *   - frequent letter/digit alternation (e.g. `x9z8q2w1`),
  *   - a long run of hex characters (a hash / GUID fragment),
- *   - a low vowel ratio paired with a long consonant run (an unpronounceable
- *     consonant cluster, e.g. `mpqxyt`), or
+ *   - a low vowel ratio paired with a consonant run of at least 5 — one past the
+ *     pronounceable ceiling (e.g. `mpqxyt`) — unless `y` genuinely acts as the
+ *     label's vowel, i.e. reading `y` as a vowel leaves the remaining consonant run
+ *     short (`crypto`, `strychnine`); a label whose non-`y` consonants still cluster
+ *     long (`mpqxyta`: `mpqx` = 4) is not rescued by a lone `y`. Readable run-4
+ *     words such as `strength` and `blindspots` stay below the run floor and never
+ *     reach this branch, or
  *   - the add-on's letters-only uppercase rule: an all-uppercase ASCII-letter
  *     token (e.g. `CAQLEV`) reads as a shouty machine label.
  *
@@ -376,12 +567,44 @@ export function computeRandomLookingCandidate(
   // length is codepoint-based, matching the heuristics above.
   if (chars.length < RANDOM_LOOKING_MIN_LENGTH) return false;
   const h = computeLexicalHeuristics(value);
+  // False-positive guard for readable brand-like labels. The low-vowel /
+  // consonant-run branch below is the only structural branch that keys on word
+  // *shape* rather than on machine-generated markers (digits, hex, alternation,
+  // shouting caps), so it is the one that can misfire on a readable but vowel-poor
+  // word. Two properties keep it narrow:
+  //
+  //   - The consonant-run floor (RANDOM_LOOKING_MIN_CONSONANT_RUN) is 5, one past
+  //     the longest cluster a pronounceable word carries. A run of exactly 4 is
+  //     shared by readable words (`strength`, `blindspots`) and generated labels
+  //     alike, and no structural test separates them — computePronounceability
+  //     included, since its 0.2 vowel floor also rejects `strength` — so run-4
+  //     tokens are left to the caller's corpus branch (see isNatural) instead of
+  //     being flagged here.
+  //   - `y` is counted as a consonant for maxConsonantRun, so an ordinary label
+  //     where `y` acts as a vowel (`crypto`: run `crypt` = 5, A/E/I/O/U vowel ratio
+  //     1/6) can reach this branch on an inflated run. Rescue such a label only when
+  //     `y` genuinely does a vowel's work: read `y` as a vowel and require the
+  //     resulting non-`y` consonant run to stay short (<= RANDOM_LOOKING_Y_VOWEL_MAX_RUN,
+  //     as in `crypto`: `cr`/`pt` = 2, or `strychnine`: `str`/`chn` = 3). This does *not* rescue
+  //     a label whose non-`y` consonants still cluster long — `mpqxyta` (vowelRatio
+  //     1/7, maxConsonantRun 6) keeps a `mpqx` = 4 run once `y` is a vowel, so a
+  //     single `y` cannot lift it out of the detector (an earlier vowelRatioAlphaOnly
+  //     ratio guard wrongly did, suppressing downstream composite signals). The
+  //     rescue also requires a real A/E/I/O/U vowel (vowelRatio > 0): a vowel-free
+  //     label reads `y` as a vowel purely by absence of any other, so a y-heavy
+  //     all-consonant run (`bcyydf`, `yyyyyy`: maxConsonantRun 6) stays flagged.
+  //
+  // The digit/hex/alternation/uppercase branches are intentionally *not* guarded:
+  // those shapes read as generated regardless of pronounceability (e.g. the
+  // pronounceable-looking but shouting `CAQLEV`).
   if (
     h.digitRatio >= RANDOM_LOOKING_MIN_DIGIT_RATIO ||
     h.letterDigitTransitionCount >= RANDOM_LOOKING_MIN_LETTER_DIGIT_TRANSITIONS ||
     h.maxHexRun >= RANDOM_LOOKING_MIN_HEX_RUN ||
     (h.vowelRatio <= RANDOM_LOOKING_MAX_VOWEL_RATIO &&
-      h.maxConsonantRun >= RANDOM_LOOKING_MIN_CONSONANT_RUN) ||
+      h.maxConsonantRun >= RANDOM_LOOKING_MIN_CONSONANT_RUN &&
+      !(h.vowelRatio > 0 &&
+        maxConsonantRunTreatingYAsVowel(value) <= RANDOM_LOOKING_Y_VOWEL_MAX_RUN)) ||
     isAllAsciiUppercaseLetters(value)
   ) {
     return true;

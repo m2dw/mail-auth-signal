@@ -318,11 +318,13 @@ export type LexicalStats = {
  *
  * Every value is computed from the token alone, with **no bundled word list,
  * brand dictionary, language corpus, or n-gram table** — only structural facts an
- * attacker cannot launder away by choosing a benign-looking string. (Bigram /
- * trigram "naturalness" was a candidate but is deliberately omitted: a meaningful
- * naturalness score needs a language-frequency dataset, and bundling one would
- * cross the data/license boundary this package keeps clear. A caller with its own
- * licensed corpus can layer that on top of these metrics.)
+ * attacker cannot launder away by choosing a benign-looking string. (A
+ * *corpus-based* bigram / trigram "naturalness" score is deliberately omitted:
+ * it needs a language-frequency dataset, and bundling one would cross the
+ * data/license boundary this package keeps clear. A caller with its own licensed
+ * corpus can layer that on top of these metrics. A *data-free* structural
+ * stand-in — Pronounceability, the false-positive guard for readable brand-like
+ * labels — is provided separately; see computePronounceability.)
  *
  * The core forms no opinion: these are inputs to a caller's own thresholds, never
  * a verdict. A "high entropy" or "long consonant run" token is suspicious only in
@@ -429,6 +431,59 @@ export type LexicalHeuristics = {
   uniqueCharCount: number;
   letterDigitTransitionCount: number;
   hasLongHexLikeRun: boolean;
+};
+
+/**
+ * Data-free structural pronounceability of a single token (see
+ * computePronounceability), the false-positive guard for the random-looking
+ * heuristics. It answers "does this token have the syllable *shape* of a
+ * pronounceable word?" using only the token itself — **no bundled word list,
+ * brand dictionary, language corpus, or n-gram table**, so it cannot be laundered
+ * by choosing a benign-looking string and never crosses the data/license boundary
+ * this package keeps clear (AGENTS.md / NOTICE).
+ *
+ * The shape it recognizes is the one that made readable brand-like labels
+ * (`anthropic`, `crowdworks`, `switchbot`) look "random" under a naive vowel /
+ * consonant-run rule: a word alternates vowels and consonants so that consonant
+ * clusters stay short and vowels recur, whereas a machine-generated label
+ * (`mpqxyt`, `qwrtplkjhg`) piles up long, vowel-starved consonant runs. It is a
+ * one-sided guard: it only ever *suppresses* a random-looking verdict, never
+ * raises one, so a token it cannot vouch for (structurally word-like gibberish
+ * such as `wlikqkgi`) is simply left to the caller rather than falsely cleared.
+ *
+ * Classification is ASCII-only and `y` counts as a consonant (a conservative
+ * choice: treating `y` as a vowel would let more gibberish pass). A non-ASCII
+ * codepoint counts toward length but not as a letter/vowel/consonant, matching
+ * LexicalHeuristics.
+ *
+ * - alphaLength:           number of ASCII letters (a-z, A-Z). 0 for an empty or
+ *                          letter-free token.
+ * - vowelCount:            number of ASCII vowels (a, e, i, o, u; case-insensitive,
+ *                          `y` excluded), matching LexicalHeuristics.vowelRatio's
+ *                          numerator.
+ * - vowelRatio:            vowelCount / alphaLength, in [0, 1]. 0 when the token has
+ *                          no ASCII letters. A pronounceable word keeps this above a
+ *                          floor; a vowel-starved run falls below it.
+ * - syllableEstimate:      number of maximal vowel *groups* (a run of adjacent
+ *                          vowels counts once), a rough syllable count. 0 for a
+ *                          vowel-free token.
+ * - maxConsonantCluster:   longest run of consecutive ASCII consonants (`y` counts
+ *                          as a consonant), reset by a vowel or any non-letter.
+ *                          Identical in spirit to LexicalHeuristics.maxConsonantRun;
+ *                          a long cluster is the tell of an unpronounceable string.
+ * - looksPronounceable:    whether the token clears every structural gate above —
+ *                          it has letters and at least one vowel, its longest
+ *                          consonant cluster is short, and its vowel ratio meets the
+ *                          floor. The boolean a caller passes (via isLikelyNaturalToken)
+ *                          as RandomLookingOptions.isNatural.
+ */
+export type Pronounceability = {
+  alphaLength: number;
+  vowelCount: number;
+  vowelRatio: number;
+  syllableEstimate: number;
+  maxConsonantCluster: number;
+  looksPronounceable: boolean;
 };
 
 /**
@@ -1066,6 +1121,19 @@ export type MessageMetrics = {
    */
   senderIdentity: SenderIdentityMetrics;
   authenticationResults: AuthenticationResultsHeader[];
+  /**
+   * True when at least one RFC 2369 / RFC 2919 mailing-list header is present
+   * (List-Id, List-Unsubscribe, List-Subscribe, List-Post, List-Archive,
+   * List-Help, or List-Owner). These headers indicate that the message was
+   * distributed through a mailing list or newsletter infrastructure.
+   *
+   * Used by route-consistency mitigations as a guard: a self-signed
+   * disposable-domain sender can satisfy aligned-DKIM + SPF-mismatch +
+   * Message-ID-route conditions without being a legitimate newsletter, but it
+   * is unlikely to include valid list headers that a spam filter or the
+   * recipient would expect to correlate with a real mailing list.
+   */
+  hasListHeaders: boolean;
 };
 
 /**

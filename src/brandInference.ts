@@ -1,6 +1,6 @@
 import { computeJaccard } from "./jaccard.js";
 import { computeJaroWinkler } from "./jaroWinkler.js";
-import { getRegistrableDomain as builtinGetRegistrableDomain } from "./psl.js";
+import { getRegistrableDomain as builtinGetRegistrableDomain, isUnderPrivateSuffix } from "./psl.js";
 import type {
   BrandCatalogEntry,
   BrandMatch,
@@ -33,6 +33,21 @@ export const BRAND_LIKE_MIN_LETTER_RATIO = 0.6;
  */
 export const BRAND_MATCH_MIN_JARO_WINKLER = 0.9;
 export const BRAND_MATCH_MIN_JACCARD = 0.5;
+
+/**
+ * Minimum length (of the shorter of the display token and the catalog brand) before
+ * a *fuzzy* (non-exact) brand match is allowed. On very short tokens the similarity
+ * metrics collapse: a 3-letter acronym brand such as "aws" scores above both
+ * thresholds against unrelated everyday words that merely end in the same letters
+ * ("jaws", "laws", "paws" → jaroWinkler ≈ 0.92, jaccard ≈ 0.67), so fuzzy matching
+ * would manufacture a brand — and therefore a brand-divergence accusation — against
+ * a benign sender an attacker could deliberately name. Below this length only an
+ * *exact* normalized-token equality qualifies, so short brands are still detected
+ * when the display name genuinely spells them (display "AWS" → brand "aws") but no
+ * longer on coincidental near-spellings. Chosen at 4: the shortest length at which
+ * one substituted/added letter no longer dominates the score. Issue #84.
+ */
+export const BRAND_MATCH_MIN_FUZZY_LENGTH = 4;
 
 /**
  * Fold Latin diacritics to their base letters: decompose to NFD and drop the
@@ -123,8 +138,15 @@ function findBrandMatch(token: string, catalog: readonly BrandCatalogEntry[]): B
     const exact = token === brand;
     const jaroWinkler = exact ? 1 : computeJaroWinkler(token, brand);
     const jaccard = exact ? 1 : computeJaccard(token, brand);
+    // Fuzzy matching is only trustworthy once both strings are long enough; on very
+    // short tokens the metrics saturate and match unrelated words (see
+    // BRAND_MATCH_MIN_FUZZY_LENGTH). Short brands still match on exact equality.
+    const fuzzyAllowed = Math.min(token.length, brand.length) >= BRAND_MATCH_MIN_FUZZY_LENGTH;
     const qualifies =
-      exact || (jaroWinkler >= BRAND_MATCH_MIN_JARO_WINKLER && jaccard >= BRAND_MATCH_MIN_JACCARD);
+      exact ||
+      (fuzzyAllowed &&
+        jaroWinkler >= BRAND_MATCH_MIN_JARO_WINKLER &&
+        jaccard >= BRAND_MATCH_MIN_JACCARD);
     if (!qualifies) continue;
     const similarity = exact ? 1 : Math.max(jaroWinkler, jaccard);
     if (best === null || similarity > best.similarity) {
@@ -139,6 +161,80 @@ function findBrandMatch(token: string, catalog: readonly BrandCatalogEntry[]): B
     }
   }
   return best;
+}
+
+/**
+ * Decide whether the From domain belongs to a matched brand, comparing at the
+ * registrable-domain (organizational) level rather than only against the literal
+ * catalog strings.
+ *
+ * The subtle false positive this closes (issue #84): a brand's real sending domains
+ * often span an *organizational family* of registrable domains and sub-brand
+ * subdomains — AWS legitimately sends from `amazon.com`, `aws.amazon.com`, and
+ * `email.aws.amazon.com`. The From domain is resolved to its registrable domain
+ * before comparison, so a catalog that lists the brand as a subdomain (e.g.
+ * `aws.amazon.com`) would never match a deeper legitimate From (`amazon.com` or
+ * `email.aws.amazon.com`, both resolving to `amazon.com`) and the message would be
+ * mislabelled as brand divergence. Folding each catalog domain through the *same*
+ * resolver — so a listed `aws.amazon.com` is recognized as the `amazon.com`
+ * organization — makes the comparison symmetric and removes the AWS ham false
+ * positive without weakening spoof detection: a spoofer on `evil.test` (or a
+ * hyphenated look-alike such as `aws-security.com`) resolves to a different
+ * registrable domain and still reads as a mismatch.
+ *
+ * The organizational-family collapse is deliberately *not* applied when the catalog
+ * entry is a brand-specific host under a shared/private hosting suffix (e.g.
+ * `brand.s3.amazonaws.com`, whose ICANN registrable domain is the shared
+ * `amazonaws.com`). Collapsing there would fold every tenant on the provider
+ * (`attacker.s3.amazonaws.com`) into the brand and suppress a real spoof; such an
+ * entry only matches its exact host or a subdomain of it (handled before the
+ * collapse). See `isUnderPrivateSuffix` (issue #84 follow-up).
+ *
+ * Returns true when the From belongs to the brand, false when it provably does not,
+ * and null when the relationship cannot be decided (no resolver and no exact hit),
+ * preserving the existing "unknown, not a mismatch" contract for the opt-out path.
+ */
+function fromBelongsToBrandDomains(
+  brandDomains: readonly string[],
+  fromDomain: string,
+  fromRegistrableDomain: string | null,
+  getRegistrableDomain: (domain: string) => string | null,
+): boolean | null {
+  // Exact From match always counts, even when the resolver returns null — a From
+  // that already *is* a listed brand domain needs no PSL resolution.
+  if (brandDomains.includes(fromDomain)) return true;
+
+  // Everything below is a registrable-domain comparison; without a resolved From
+  // registrable domain we cannot substantiate a subdomain/family relationship and
+  // must not assert a mismatch, so the result stays unknown.
+  if (fromRegistrableDomain === null) return null;
+
+  for (const brandDomain of brandDomains) {
+    // From is a subdomain of a listed brand domain (mail.paypal.com under paypal.com),
+    // or its registrable domain is exactly a listed brand domain.
+    if (brandDomain === fromRegistrableDomain || fromDomain.endsWith(`.${brandDomain}`)) {
+      return true;
+    }
+    // Same organizational family: the listed brand domain and the From resolve to
+    // the same registrable domain (aws.amazon.com and amazon.com → amazon.com).
+    //
+    // Skip this collapse when the catalog entry is a brand-specific host *under* a
+    // shared/private hosting suffix (e.g. brand.s3.amazonaws.com, whose ICANN
+    // registrable domain is the shared amazonaws.com): collapsing it would let any
+    // unrelated tenant on the same provider (attacker.s3.amazonaws.com → amazonaws.com)
+    // read as the brand and suppress the divergence signal. Such a From is only a
+    // genuine match when it is that exact host or a subdomain of it — both already
+    // handled above — so falling through to a decisive mismatch is the safe direction
+    // an attacker cannot exploit (issue #84 follow-up).
+    if (isUnderPrivateSuffix(brandDomain)) continue;
+    const brandRegistrableDomain = getRegistrableDomain(brandDomain);
+    if (brandRegistrableDomain !== null && brandRegistrableDomain === fromRegistrableDomain) {
+      return true;
+    }
+  }
+
+  // Resolver was available and no family relationship held: a decisive mismatch.
+  return false;
 }
 
 /**
@@ -215,29 +311,22 @@ export function computeDisplayNameBrandInference(
   const match = findBrandMatch(brandToken, catalog);
   const inferredBrandDomains = match ? match.domains : [];
 
-  // Compare the brand's registrable domains against both the From registrable
-  // domain (when resolvable) and the bare From domain, mirroring how
-  // computeSenderIdentity matches the public-mailbox catalog: a From that already
-  // *is* its registrable domain still matches even when the resolver returns null.
-  //
-  // Crucially, a non-match is only meaningful when we can actually compare
-  // registrable domains. Without PSL resolution (caller opted out, or a custom
-  // resolver returned null) a legitimate brand subdomain such as
-  // mail.paypal.com is indistinguishable from a genuine mismatch, so we leave
-  // the result `null` (unknown) rather than asserting a mismatch.
-  let brandDomainMatchesFromDomain: boolean | null;
-  if (match === null) {
-    brandDomainMatchesFromDomain = null;
-  } else if (match.domains.includes(fromDomain)) {
-    // Exact From match always counts, even when the resolver returns null.
-    brandDomainMatchesFromDomain = true;
-  } else if (fromRegistrableDomain !== null) {
-    // Registrable-domain comparison is available, so a non-match is decisive.
-    brandDomainMatchesFromDomain = match.domains.includes(fromRegistrableDomain);
-  } else {
-    // No exact match and no registrable-domain resolution: cannot decide.
-    brandDomainMatchesFromDomain = null;
-  }
+  // Compare the brand's domains against the From domain at the registrable
+  // (organizational) level, resolving both sides through the same PSL resolver so a
+  // brand's wider domain family (e.g. AWS's amazon.com / aws.amazon.com) is
+  // recognized rather than mislabelled as divergence (see fromBelongsToBrandDomains,
+  // issue #84). A non-match is only meaningful when registrable domains can actually
+  // be compared; without PSL resolution the relationship stays `null` (unknown)
+  // rather than a false mismatch.
+  const brandDomainMatchesFromDomain =
+    match === null
+      ? null
+      : fromBelongsToBrandDomains(
+          match.domains,
+          fromDomain,
+          fromRegistrableDomain,
+          getRegistrableDomain,
+        );
 
   return {
     applicable: true,

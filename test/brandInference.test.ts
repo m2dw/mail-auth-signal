@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeMessage,
+  BRAND_MATCH_MIN_FUZZY_LENGTH,
   computeDisplayNameBrandInference,
   computeJaccard,
   foldLatinDiacritics,
@@ -193,6 +194,136 @@ describe("computeDisplayNameBrandInference — guardrails / not-applicable reaso
     const result = computeDisplayNameBrandInference("PayPal", "evil.test", [], resolve);
     expect(result.applicable).toBe(false);
     expect(result.notApplicableReason).toBe("empty-catalog");
+  });
+});
+
+describe("computeDisplayNameBrandInference — AWS organizational family (issue #84)", () => {
+  // AWS legitimately sends from an organizational *family* of domains — amazon.com,
+  // aws.amazon.com, email.aws.amazon.com — that all resolve to the amazon.com
+  // registrable domain. A catalog listing a single AWS domain must not flag the
+  // rest of the family as brand divergence.
+  const awsCatalog: BrandCatalogEntry[] = [
+    { brand: "aws", domains: ["aws.amazon.com"] },
+    { brand: "paypal", domains: ["paypal.com"] },
+  ];
+  const awsResolve = (domain: string): string | null => {
+    if (domain === "amazon.com" || domain.endsWith(".amazon.com")) return "amazon.com";
+    if (domain === "amazonaws.com" || domain.endsWith(".amazonaws.com")) return "amazonaws.com";
+    if (domain === "paypal.com" || domain.endsWith(".paypal.com")) return "paypal.com";
+    if (domain === "paypal-support.com") return "paypal-support.com";
+    if (domain === "aws-security.com") return "aws-security.com";
+    if (domain === "evil.test" || domain.endsWith(".evil.test")) return "evil.test";
+    return null;
+  };
+
+  it("does not flag legitimate AWS mail from the parent org domain (the ham FP)", () => {
+    // Catalog lists aws.amazon.com; the real message is from amazon.com. Both resolve
+    // to the amazon.com organization, so this must read as belonging, not divergence.
+    const result = computeDisplayNameBrandInference("AWS", "amazon.com", awsCatalog, awsResolve);
+    expect(result.applicable).toBe(true);
+    expect(result.match?.brand).toBe("aws");
+    expect(result.match?.exact).toBe(true);
+    expect(result.brandDomainMatchesFromDomain).toBe(true);
+  });
+
+  it("does not flag a deeper legitimate AWS sending subdomain", () => {
+    const result = computeDisplayNameBrandInference(
+      "AWS",
+      "email.aws.amazon.com",
+      awsCatalog,
+      awsResolve,
+    );
+    expect(result.fromRegistrableDomain).toBe("amazon.com");
+    expect(result.brandDomainMatchesFromDomain).toBe(true);
+  });
+
+  it("still flags a clear AWS impersonation from an unrelated domain", () => {
+    const result = computeDisplayNameBrandInference("AWS", "evil.test", awsCatalog, awsResolve);
+    expect(result.match?.brand).toBe("aws");
+    expect(result.brandDomainMatchesFromDomain).toBe(false);
+  });
+
+  it("still flags an AWS look-alike (hyphenated) domain the org does not own", () => {
+    // aws-security.com is a different registrable domain — a classic look-alike an
+    // attacker registers — so it must not be absorbed into the amazon.com family.
+    const result = computeDisplayNameBrandInference(
+      "AWS",
+      "aws-security.com",
+      awsCatalog,
+      awsResolve,
+    );
+    expect(result.brandDomainMatchesFromDomain).toBe(false);
+  });
+
+  it("still flags a spoof when the catalog domain is a brand host under a shared provider suffix", () => {
+    // A catalog that lists a brand-specific host under a shared/private hosting suffix
+    // (brand.s3.amazonaws.com, whose ICANN registrable domain is the shared
+    // amazonaws.com). An unrelated tenant on the same provider must NOT be absorbed
+    // into the brand by the organizational-family collapse — otherwise a spoofer on
+    // attacker.s3.amazonaws.com (same amazonaws.com registrable) would suppress the
+    // divergence signal. Issue #84 follow-up.
+    const sharedHostCatalog: BrandCatalogEntry[] = [
+      { brand: "aws", domains: ["brand.s3.amazonaws.com"] },
+    ];
+    const result = computeDisplayNameBrandInference(
+      "AWS",
+      "attacker.s3.amazonaws.com",
+      sharedHostCatalog,
+      awsResolve,
+    );
+    expect(result.match?.brand).toBe("aws");
+    expect(result.brandDomainMatchesFromDomain).toBe(false);
+  });
+
+  it("still recognizes legitimate mail from the exact brand host under a shared suffix", () => {
+    // The carve-out only skips the registrable collapse; an exact host match (or a
+    // subdomain of it) is still a genuine belonging and must not be flagged.
+    const sharedHostCatalog: BrandCatalogEntry[] = [
+      { brand: "aws", domains: ["brand.s3.amazonaws.com"] },
+    ];
+    const exact = computeDisplayNameBrandInference(
+      "AWS",
+      "brand.s3.amazonaws.com",
+      sharedHostCatalog,
+      awsResolve,
+    );
+    expect(exact.brandDomainMatchesFromDomain).toBe(true);
+
+    const subdomain = computeDisplayNameBrandInference(
+      "AWS",
+      "mail.brand.s3.amazonaws.com",
+      sharedHostCatalog,
+      awsResolve,
+    );
+    expect(subdomain.brandDomainMatchesFromDomain).toBe(true);
+  });
+
+  it("exposes the short-brand fuzzy-match floor as a public constant", () => {
+    expect(BRAND_MATCH_MIN_FUZZY_LENGTH).toBe(4);
+  });
+
+  it("does not fuzzy-match a short brand against a coincidental everyday word", () => {
+    // "Jaws" / "Laws" score above the Jaro-Winkler + Jaccard thresholds against the
+    // 3-letter brand "aws", but must not manufacture a brand match on a short token —
+    // otherwise a benign sender an attacker names "Jaws" would be flagged.
+    for (const name of ["Jaws", "Laws", "Paws"]) {
+      const result = computeDisplayNameBrandInference(name, "evil.test", awsCatalog, awsResolve);
+      expect(result.match, `${name} must not match a short brand fuzzily`).toBeNull();
+      expect(result.brandDomainMatchesFromDomain).toBeNull();
+    }
+  });
+
+  it("keeps flagging an ordinary non-AWS brand divergence (regression guard)", () => {
+    // A hyphenated PayPal look-alike is still a mismatch — the family fix must not
+    // weaken obvious divergence detection.
+    const result = computeDisplayNameBrandInference(
+      "PayPal",
+      "paypal-support.com",
+      awsCatalog,
+      awsResolve,
+    );
+    expect(result.match?.brand).toBe("paypal");
+    expect(result.brandDomainMatchesFromDomain).toBe(false);
   });
 });
 

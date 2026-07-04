@@ -70,6 +70,25 @@ describe("composite.deepRandomFromSubdomain", () => {
     expect(signal?.data?.randomLabels).toContain("a8f3qz");
   });
 
+  it("fires on a low-vowel, long-consonant deep subdomain label with a lone `y` (issue #87)", () => {
+    // Regression: `mpqxyta` (vowelRatio 1/7, maxConsonantRun 6) is unpronounceable
+    // despite its single `y`, so the random-looking helper must keep flagging it and
+    // the deep-subdomain composite must still fire — a lone `y` must not suppress the
+    // signal for an otherwise generated deep-subdomain label.
+    const result = analyze(
+      {
+        headers: {
+          from: "Notice <notice@mpqxyta.k2pls.cheapdomain.test>",
+          "authentication-results": `${TRUSTED_ID}; dmarc=fail header.from=mpqxyta.k2pls.cheapdomain.test`,
+        },
+        options: { trustedAuthservIds: [TRUSTED_ID] },
+      },
+      deps,
+    );
+    const signal = compositeSignal(result, "composite.deepRandomFromSubdomain");
+    expect(signal?.data?.randomLabels).toContain("mpqxyta");
+  });
+
   it("stays silent (ham-like) when an aligned DKIM signature authenticates the From", () => {
     const result = analyze(
       {
@@ -83,6 +102,28 @@ describe("composite.deepRandomFromSubdomain", () => {
     );
     expect(result.metrics.authentication.anyAuthAligned).toBe(true);
     expect(compositeKeys(result)).not.toContain("composite.deepRandomFromSubdomain");
+  });
+
+  it("does not raise the random-label candidate for readable brand-like subdomain labels, yet the structural candidate still fires when the broader context is suspicious", () => {
+    // issue-87 guard in context: a deep subdomain whose labels are readable,
+    // brand-like or service words (`anthropic`, `support`) must not read as
+    // random. The lexical composite stays silent (no false positive on shape),
+    // but the *structure*-driven unsecuredDeepSubdomainCandidate still fires
+    // because the organizational domain publishes no enforced DMARC policy —
+    // broader context, not label shape, is what raises that signal.
+    const result = analyze(
+      {
+        headers: {
+          from: "Team <team@anthropic.support.cheapdomain.test>",
+          "authentication-results": `${TRUSTED_ID}; dmarc=none header.from=anthropic.support.cheapdomain.test`,
+        },
+        options: { trustedAuthservIds: [TRUSTED_ID] },
+      },
+      deps,
+    );
+    const keys = compositeKeys(result);
+    expect(keys).not.toContain("composite.deepRandomFromSubdomain");
+    expect(keys).toContain("composite.unsecuredDeepSubdomainCandidate");
   });
 
   it("stays silent without a resolver (subdomain depth is unknown)", () => {
@@ -206,6 +247,60 @@ describe("composite.brandDivergencePhishing", () => {
       options: { trustedAuthservIds: [TRUSTED_ID] },
     });
     expect(compositeKeys(result)).not.toContain("composite.brandDivergencePhishing");
+  });
+
+  // Issue #84: AWS legitimately sends from an organizational family of domains that
+  // resolve to amazon.com under the built-in PSL. A catalog listing one AWS domain
+  // must not flag the rest of the family, while a genuine AWS spoof still fires.
+  describe("AWS organizational family (issue #84)", () => {
+    const awsCatalog: BrandCatalogEntry[] = [{ brand: "aws", domains: ["aws.amazon.com"] }];
+
+    it("stays silent (ham) on legitimate AWS mail from the parent org domain", () => {
+      // From amazon.com resolves to the amazon.com organization that owns the listed
+      // aws.amazon.com — no divergence. Uses the default built-in PSL resolver.
+      const result = analyze(
+        {
+          headers: {
+            from: '"AWS" <no-reply@amazon.com>',
+            "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=amazon.com; dkim=pass header.d=amazon.com`,
+          },
+          options: { trustedAuthservIds: [TRUSTED_ID] },
+        },
+        { brandCatalog: awsCatalog },
+      );
+      expect(compositeKeys(result)).not.toContain("composite.brandDivergencePhishing");
+      expect(result.metrics.senderIdentity.brandInference?.brandDomainMatchesFromDomain).toBe(true);
+    });
+
+    it("stays silent (ham) on a deeper legitimate AWS sending subdomain", () => {
+      const result = analyze(
+        {
+          headers: {
+            from: '"AWS" <no-reply@email.aws.amazon.com>',
+            "authentication-results": `${TRUSTED_ID}; dmarc=pass header.from=amazon.com; dkim=pass header.d=amazon.com`,
+          },
+          options: { trustedAuthservIds: [TRUSTED_ID] },
+        },
+        { brandCatalog: awsCatalog },
+      );
+      expect(compositeKeys(result)).not.toContain("composite.brandDivergencePhishing");
+    });
+
+    it("fires high (spam) on a clear AWS impersonation from an unrelated domain", () => {
+      const result = analyze(
+        {
+          headers: {
+            from: '"AWS" <security@evil.test>',
+            "authentication-results": `${TRUSTED_ID}; dmarc=fail header.from=evil.test`,
+          },
+          options: { trustedAuthservIds: [TRUSTED_ID] },
+        },
+        { brandCatalog: awsCatalog },
+      );
+      const signal = compositeSignal(result, "composite.brandDivergencePhishing");
+      expect(signal?.severity).toBe("high");
+      expect(signal?.data?.inferredBrand).toBe("aws");
+    });
   });
 });
 

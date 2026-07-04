@@ -2,6 +2,116 @@
 
 ## Unreleased
 
+## v0.5.2 — 2026-07-04
+- Fixed AWS brand-divergence false positives in display-name brand inference (issue #84).
+  Fable 5 analysis of the 2026-07-04 add-on logs found `composite.brandDivergencePhishing`
+  useful overall but mislabelling legitimate AWS mail as impersonation. Two root causes,
+  both in `src/brandInference.ts`, fixed without weakening obvious spoof detection:
+  - **Organizational-family domain matching.** A brand's real sending domains span a
+    family of registrable domains and sub-brand subdomains — AWS sends from `amazon.com`,
+    `aws.amazon.com`, and `email.aws.amazon.com`, all resolving to `amazon.com`. The From
+    domain was reduced to its registrable domain before comparison but the catalog domains
+    were not, so a catalog listing `aws.amazon.com` never matched a legitimate `amazon.com`
+    / `email.aws.amazon.com` From and the message read as divergence. `brandDomainMatchesFromDomain`
+    now folds each catalog domain through the same PSL resolver (and accepts a From that is a
+    subdomain of a listed brand domain), so an organizationally-owned From is recognized. A
+    spoofer on `evil.test` or a hyphenated look-alike such as `aws-security.com` resolves to a
+    different registrable domain and still reads as a mismatch. The opt-out (`getRegistrableDomain: () => null`)
+    contract is unchanged: without resolution the relationship stays `null` (unknown), never a false mismatch.
+  - **Short-brand fuzzy-match guard.** On very short tokens the Jaro-Winkler and Jaccard
+    metrics saturate: the 3-letter brand `aws` scored above both thresholds against unrelated
+    words ending in the same letters (`jaws`, `laws`, `paws`), which an attacker could exploit
+    to frame a benign sender. Fuzzy matching now requires both strings to be at least
+    `BRAND_MATCH_MIN_FUZZY_LENGTH` (4) characters; short brands still match on exact spelling
+    (display `AWS` → brand `aws`), so acronym impersonation detection is unchanged.
+  - **Shared/private hosting-suffix carve-out.** The organizational-family collapse above
+    must not fold a brand-specific host that lives *under* a shared/private hosting suffix
+    down to the shared provider's registrable domain. With the built-in resolver
+    (`allowPrivateDomains: false`) both `brand.s3.amazonaws.com` and
+    `attacker.s3.amazonaws.com` reduce to `amazonaws.com`, so a catalog entry
+    `brand.s3.amazonaws.com` would have made an unrelated tenant on the same provider read
+    as the brand and suppressed `displayName.brandDomainMismatch` /
+    `composite.brandDivergencePhishing`. `fromBelongsToBrandDomains` now skips the
+    registrable-domain collapse when the catalog entry is under a PSL private suffix (new
+    `isUnderPrivateSuffix` helper in `src/psl.ts`); such an entry still matches its exact
+    host or a subdomain of it, and any other sender on the shared provider reads as a
+    decisive mismatch again.
+  - Added unit coverage in `test/brandInference.test.ts` (AWS family ham cases, AWS
+    impersonation, hyphenated look-alike, short-token fuzzy guard, non-AWS regression,
+    shared-provider-suffix spoof and its exact/subdomain ham cases) and
+    integration coverage in `test/compositeMigrated.test.ts` under the built-in PSL, plus
+    `isUnderPrivateSuffix` coverage in `test/psl.test.ts`. Exported the new
+    `BRAND_MATCH_MIN_FUZZY_LENGTH` constant.
+- Hardened geo / deep-service-word domain-shape signals against aligned-DKIM
+  evasion (issue #83). Added two opt-in composite signals to
+  `defaultCompositeRules`, each a fact-based, severity-`low` candidate with no
+  score deltas or actions (those stay caller-owned):
+  - `composite.geoTokenCompoundDomain`: the visible From's *registrable* domain is
+    a geo/token compound — a hyphenated throwaway label carrying a two-letter
+    region token, e.g. `official-zh-ayx.com`. Fires on the domain *shape*, so it is
+    **not** suppressed by aligned DKIM.
+  - `composite.deepServiceWordSubdomain`: the visible From is on a deep subdomain
+    (`subdomainDepth >= 2`) stacking a readable service word (`accounts`, `events`,
+    `updates`, `users`, `orders`, `system`, `form`, …) next to a machine-generated
+    label — the "service-word sandwich" of a disposable domain. Also **not**
+    suppressed by aligned DKIM.
+  - **Adversarial reason for dropping the `!anyDkimAligned` suppression.** The
+    2026-07 add-on log analysis found spam adapting to the L4 rules: the same
+    disposable sender (`official-zh-ayx.com`) suppressed a domain-shape rule simply
+    by aligning DKIM. Because the spammer *owns* the throwaway domain, they can
+    align DKIM on it at near-zero cost, so a `!anyDkimAligned` guard is an
+    attacker-controlled off switch on a rule that is supposed to judge the domain
+    shape. These signals therefore treat DKIM alignment as *context*
+    (`data.dkimAligned`), never as a hard suppression. They do not make aligned mail
+    broadly suspicious: a suspicious domain shape (geo/token compound registrable
+    domain, or a deep service-word subdomain with a machine-generated companion
+    label) is still required, so ordinary DKIM-aligned mail on an everyday domain
+    does not fire. Both require a trusted sender-auth check to have run.
+  - Expanded the `deepServiceWordSubdomain` service-word vocabulary well beyond the
+    add-on's original small set (a reason it fired zero times), exported as
+    `SERVICE_WORD_SUBDOMAIN_LABELS` alongside `GEO_COMPOUND_TOKENS` and the
+    `isServiceWordLabel` / `isGeoCompoundToken` / `isGeoTokenCompoundLabel`
+    helpers. The vocabulary is this project's own curated, Apache-2.0 list — no
+    imported brand list, spam corpus, or PSL slice — and deliberately excludes
+    ubiquitous mail-infrastructure labels (`mail`, `secure`, `login`, …) so
+    legitimate `<random>.mail.<brand>.com` ESP infrastructure does not false-fire.
+    Covered by `test/geoServiceWordDomainShape.test.ts`.
+  - Review follow-up (issue #83): tightened `isGeoTokenCompoundLabel` so a
+    three-part hyphenated label no longer qualifies on segment count alone when its
+    only geo token is *also* a common English word (`us`, `in`, `at`, `be`, `my`,
+    `it`, `no`, now exported as `COMMON_WORD_GEO_TOKENS` / `isCommonWordGeoToken`).
+    Such a compound now needs either a machine-generated companion segment or a bare
+    region-code geo token, so ordinary aligned senders like `contact-us-now.com` and
+    `made-in-china.com` no longer emit the signal, while `official-zh-ayx.com` (bare
+    `zh`) still does. Also made the emitted `data.dkimAligned` context accurate for
+    relaxed (organizational) alignment on the default `analyzeMessage` path — both
+    signals now fold in the built-in-PSL `hasBuiltinPslOrgAlignedDkim` fallback, so a
+    relaxed-aligned From such as `accounts.k2m9x7.cheapdomain.com` signed by
+    `d=cheapdomain.com` reports `dkimAligned: true` instead of exact-only `false`.
+
+- **Security hardening (issue #85):** `composite.delegatedDkimAlignedRouteConsistent`
+  (new, info) requires mailing-list headers as an adversarial guard.
+
+  **New signal:** `composite.delegatedDkimAlignedRouteConsistent` — a false-positive
+  mitigation for legitimate ESP/newsletter senders whose messages show From-aligned
+  DKIM, an SPF smtp.mailfrom mismatch (delegated envelope), and a Message-ID domain
+  that shares a registrable domain with the smtp.mailfrom (route consistency). The
+  signal fires only when at least one RFC 2369/2919 list header is present (List-Id,
+  List-Unsubscribe, List-Subscribe, List-Post, List-Archive, List-Help, or List-Owner).
+
+  **Why the List-header guard is required (adversarial rationale):** a self-signed
+  disposable-domain bulk sender trivially satisfies the routing conditions — they
+  control their own domain (aligned DKIM pass), choose any smtp.mailfrom that differs
+  from the From (envelope mismatch), and stamp a matching Message-ID. Without an
+  additional signal of newsletter context, the mitigation could be used to offset a
+  spam score for mail that has no legitimate list context. Requiring list headers
+  preserves the intended use case (verified delegated newsletters) while making the
+  mitigation far less useful to disposable-domain senders who omit them.
+
+  **New metric:** `hasListHeaders` (boolean) on `MessageMetrics` — true when any of
+  the above list headers is present. Added to `METRIC_KEYS` in `parity.test.ts` and
+  all serializable fixtures updated. No change to any existing signal.
+
 ## v0.5.1 — 2026-07-03
 - Migrated further Layer 4 composite rule signals into the reusable core (issue #65),
   extending `defaultCompositeRules` with five named, stable, opt-in signals. Each

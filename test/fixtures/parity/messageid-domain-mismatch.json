@@ -18,6 +18,7 @@
   "expected": {
     "metrics": {
       "fromDomain": "example.com",
+      "hasListHeaders": false,
       "senderDomain": null,
       "senderDomainMatchesFromDomain": null,
       "senderDomainRegistrableMatchesFromDomain": null,

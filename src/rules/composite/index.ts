@@ -11,17 +11,25 @@ import { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandi
 import { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
 import { unsecuredDeepSubdomainCandidateRule } from "./unsecuredDeepSubdomainCandidate.js";
 import { deepRandomFromSubdomainRule } from "./deepRandomFromSubdomain.js";
+import { deepServiceWordSubdomainRule } from "./deepServiceWordSubdomain.js";
+import { geoTokenCompoundDomainRule } from "./geoTokenCompoundDomain.js";
 import { brandDivergencePhishingRule } from "./brandDivergencePhishing.js";
 import { ownDomainSpoofCandidateRule } from "./ownDomainSpoofCandidate.js";
 import { dkimFailWithAlignedPassRule } from "./dkimFailWithAlignedPass.js";
 import { dkimAlignedLexicalMitigationRule } from "./dkimAlignedLexicalMitigation.js";
 import { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
+import { delegatedDkimAlignedRouteConsistentRule } from "./delegatedDkimAlignedRouteConsistent.js";
 
-export { unauthenticatedFromSpoofRule } from "./unauthenticatedFromSpoof.js";
+export {
+  unauthenticatedFromSpoofRule,
+  ARC_TRUSTED_FORWARDING_CONTEXT_KEY,
+} from "./unauthenticatedFromSpoof.js";
 export { publicMailboxSpoofingCandidateRule } from "./publicMailboxSpoofingCandidate.js";
 export { authenticatedDisplayNameSpoofRule } from "./authenticatedDisplayNameSpoof.js";
 export { unsecuredDeepSubdomainCandidateRule } from "./unsecuredDeepSubdomainCandidate.js";
 export { deepRandomFromSubdomainRule } from "./deepRandomFromSubdomain.js";
+export { deepServiceWordSubdomainRule } from "./deepServiceWordSubdomain.js";
+export { geoTokenCompoundDomainRule } from "./geoTokenCompoundDomain.js";
 export { brandDivergencePhishingRule } from "./brandDivergencePhishing.js";
 export {
   ownDomainSpoofCandidateRule,
@@ -30,6 +38,7 @@ export {
 export { dkimFailWithAlignedPassRule } from "./dkimFailWithAlignedPass.js";
 export { dkimAlignedLexicalMitigationRule } from "./dkimAlignedLexicalMitigation.js";
 export { alignedAuthenticationConfirmedRule } from "./alignedAuthenticationConfirmed.js";
+export { delegatedDkimAlignedRouteConsistentRule } from "./delegatedDkimAlignedRouteConsistent.js";
 
 /**
  * The built-in composite (Layer 4) rule set.
@@ -55,10 +64,13 @@ export const defaultCompositeRules: readonly CompositeRule[] = [
   authenticatedDisplayNameSpoofRule,
   unsecuredDeepSubdomainCandidateRule,
   deepRandomFromSubdomainRule,
+  deepServiceWordSubdomainRule,
+  geoTokenCompoundDomainRule,
   brandDivergencePhishingRule,
   ownDomainSpoofCandidateRule,
   dkimFailWithAlignedPassRule,
   dkimAlignedLexicalMitigationRule,
+  delegatedDkimAlignedRouteConsistentRule,
   alignedAuthenticationConfirmedRule,
 ];
 

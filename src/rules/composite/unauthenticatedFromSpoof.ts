@@ -1,4 +1,26 @@
-import type { CompositeRule, Signal } from "../../types.js";
+import type { AnalyzeOptions, CompositeRule, Signal } from "../../types.js";
+import { resolveHeaderTrust } from "../trust.js";
+
+/**
+ * The caller-context key this composite reads its ARC forwarding-trust policy
+ * from. A trusted `arc=pass` proves only that an ARC chain is cryptographically
+ * intact — it does *not* prove the chain came through a forwarder the recipient
+ * trusts, nor that the original message authenticated, because a direct spoofer
+ * can seal its own valid ARC set and make a verifier that stamps `arc=pass` for
+ * any valid chain emit one. So arc=pass is used to suppress this signal only when
+ * the caller opts in through the open-ended AnalyzeOptions.context bag (documented
+ * on AnalyzeOptions) under this key with the boolean value `true`, asserting that
+ * in its deployment a *trusted* verifier's `arc=pass` reflects validated,
+ * trusted forwarding rather than a bare cryptographic chain check. Absent this
+ * opt-in the ARC guard stays inert and the signal is evaluated normally, so the
+ * default posture never hands a spoofer a one-header bypass.
+ */
+export const ARC_TRUSTED_FORWARDING_CONTEXT_KEY = "trustArcForwarding";
+
+/** Read the caller's opt-in ARC forwarding-trust policy from options.context. */
+function readArcForwardingTrust(options: AnalyzeOptions): boolean {
+  return options.context?.[ARC_TRUSTED_FORWARDING_CONTEXT_KEY] === true;
+}
 
 /**
  * Composite: a From-domain spoof that the message's own authentication cannot
@@ -15,6 +37,28 @@ import type { CompositeRule, Signal } from "../../types.js";
  * sender identifier disagrees with the From" is the spoof shape. This composite
  * fires only when both hold, turning two individually noisy hints into one
  * high-confidence observation.
+ *
+ * Forwarding / list false-positive risk. Legitimate forwarding and mailing-list
+ * traffic reproduces this shape without any spoof: a relay rewrites the envelope,
+ * so SPF fails and Return-Path / smtp.mailfrom name the forwarder rather than the
+ * author, while the visible From is untouched. Field analysis attributed a large
+ * block of this signal's false positives to exactly that pattern (docomo /
+ * rakumail-style forwarders). The guardrail is an *opt-in* ARC forwarding-trust
+ * policy: when the caller declares (via the ARC_TRUSTED_FORWARDING_CONTEXT_KEY
+ * context flag) that in its deployment a trusted verifier's `arc=pass` reflects
+ * validated, trusted forwarding, a rule-time-trusted `arc=pass` suppresses the
+ * signal (see the trustedArcPass guard below). The opt-in is required because
+ * `arc=pass` alone attests only that an ARC chain is cryptographically intact, not
+ * that it came through a trusted forwarder or that the original message
+ * authenticated — a direct spoofer can seal its own valid ARC set, so an
+ * unconditional arc=pass suppression would be a one-header bypass. Forge-able
+ * forwarding markers (List-*, Resent-*, the ARC-Seal / ARC-Message-Signature chain
+ * headers) are likewise deliberately *not* used to suppress, because an attacker
+ * can add them to their own spoof. Callers keep using the signal unchanged — the
+ * guard lives here so the forwarding exception does not have to be re-implemented
+ * downstream; a caller wanting the strongest guarantee should leave the opt-in off
+ * (or additionally weigh the ARC-sealed original authentication where it consumes
+ * this signal).
  *
  * Why these guards (false-positive control):
  *   - a parseable From domain (metrics.fromDomain !== null): the whole premise is
@@ -85,13 +129,17 @@ import type { CompositeRule, Signal } from "../../types.js";
  *     attacker could pin a forged mismatch onto an honest failure and escalate it.
  *
  * Not attacker-triggerable as a false positive against a third party: the only
- * way to *suppress* this signal is to authenticate the From domain (which a
- * spoofer of someone else's domain cannot) or to make every identifier agree with
+ * ways to *suppress* this signal are to authenticate the From domain (which a
+ * spoofer of someone else's domain cannot), to make every identifier agree with
  * the From (which, for a domain they do not control, means actually being that
- * domain). And it cannot be *manufactured* against an honest sender by injecting a
- * forge-able Authentication-Results header, because only trusted AR-derived or
- * message-header mismatches qualify as evidence. An attacker can only trigger it on
- * their own spoof.
+ * domain), or — only when the caller has opted into the ARC forwarding-trust
+ * policy — to present a rule-time-trusted forwarding arc=pass. Because arc=pass is
+ * attacker-sealable, that last path is gated behind the caller's explicit opt-in
+ * and its documented residual risk, rather than trusted unconditionally; with the
+ * opt-in off it cannot suppress at all. And the signal cannot be *manufactured*
+ * against an honest sender by injecting a forge-able Authentication-Results header,
+ * because only trusted AR-derived or message-header mismatches qualify as evidence.
+ * An attacker can only trigger it on their own spoof.
  *
  * Severity high: it combines a failure to authenticate with positive evidence of
  * a divergent identity. It remains an observation, not an action — the caller
@@ -101,7 +149,7 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
   key: "composite.unauthenticatedFromSpoof",
   description:
     "The visible From domain has no aligned, trusted authentication and another sender identifier disagrees with it.",
-  evaluate({ metrics, signals }): Signal[] {
+  evaluate({ metrics, signals, options }): Signal[] {
     const { authentication, fromDomain } = metrics;
     // A visible-From spoof needs a visible From. With no parseable From domain the
     // From-comparison consistency signals cannot fire, and the only consistency
@@ -123,6 +171,50 @@ export const unauthenticatedFromSpoofRule: CompositeRule = {
       authentication.dkimResults.some((result) => result.trusted) ||
       authentication.dmarcResults.some((result) => result.trusted);
     if (!hasTrustedSenderAuth) return [];
+    // Forwarding / mailing-list false-positive guard (opt-in ARC trust policy).
+    //
+    // A large share of this signal's false positives come from legitimate
+    // forwarding and list traffic (e.g. docomo / rakumail-style forwarders): the
+    // relay rewrites the envelope, so SPF fails and Return-Path / smtp.mailfrom now
+    // name the forwarder rather than the author, producing exactly the "no aligned
+    // authentication + a divergent envelope identifier" shape this composite keys
+    // on — even though the visible From was never spoofed. When the caller has
+    // opted into the ARC forwarding-trust policy (see
+    // ARC_TRUSTED_FORWARDING_CONTEXT_KEY), a rule-time-trusted `arc=pass` suppresses
+    // the signal: the caller has declared that in its deployment a trusted
+    // verifier's `arc=pass` means the receiving boundary validated the forwarding
+    // chain and honored the relayed path, so the envelope divergence is relaying,
+    // not impersonation.
+    //
+    // The opt-in is mandatory because `arc=pass` alone is *not* proof of trusted
+    // forwarding. It attests only that an ARC chain is cryptographically intact; a
+    // direct spoofer can seal its own valid ARC set, and a verifier that emits
+    // `arc=pass` for any valid chain will then stamp the recipient's trusted
+    // Authentication-Results header with `arc=pass` — so suppressing on it
+    // unconditionally would hand any spoofer a one-header bypass. List-Id /
+    // List-Unsubscribe, Resent-*, and the ARC-Seal / ARC-Message-Signature chain
+    // headers are free-text headers an attacker can likewise staple onto a spoof and
+    // are never used to suppress. Trust is resolved at rule time via
+    // resolveHeaderTrust — the same trust resolution the rest of this composite uses
+    // — so a split-API caller that extracts metrics without trust and declares
+    // trustedAuthservIds at runRules/runCompositeRules time gets the same suppression
+    // analyzeMessage would, rather than reading the stale extraction-time
+    // header.trusted flag. An untrusted arc=pass — an attacker's own forwarder
+    // claiming a valid chain — is ignored for the same reason the untrusted SPF/DKIM
+    // tells below are. Residual risk: even a trusted arc=pass attests chain
+    // integrity, not that the origin passed DMARC, which is why it suppresses only
+    // under the caller's explicit opt-in; a caller wanting the strongest guarantee
+    // leaves the opt-in off (or weighs the ARC-sealed original authentication where
+    // it consumes this signal).
+    const arcForwardingTrusted = readArcForwardingTrust(options);
+    const trustedArcPass =
+      arcForwardingTrusted &&
+      metrics.authenticationResults.some(
+        (header) =>
+          resolveHeaderTrust(header, options) &&
+          header.methods.some((method) => method.method === "arc" && method.result === "pass"),
+      );
+    if (trustedArcPass) return [];
     // An aligned, trusted, passing identifier authenticates the From domain.
     // Honor the PSL-aware (organizational) view as the practical default so a
     // DMARC-relaxed aligned subdomain (From news.example.co.jp authenticated by an
