@@ -1,6 +1,6 @@
 {
   "name": "mail-auth-signal",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "A lightweight sender-risk signal engine for email authentication results and header consistency analysis.",
   "license": "Apache-2.0",
   "author": "m2dw",
@@ -19,12 +19,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": "./dist/browser/mail-auth-signal.esm.js",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts --clean --out-dir dist",
+    "build": "tsup --config tsup.node.config.ts && tsup --config tsup.browser.config.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "release:check": "npm run typecheck && npm test && npm run build && npm pack --dry-run",

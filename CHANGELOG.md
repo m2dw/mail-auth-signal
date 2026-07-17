@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.5.3 — 2026-07-16
+
+- Added `dist/browser/mail-auth-signal.esm.js`, a self-contained ESM build with
+  the `tldts` runtime dependency bundled in, for consumers that vendor a single
+  file instead of resolving npm dependencies (e.g. Thunderbird 102-107 add-ons,
+  which do not support import maps). `dist/index.js`/`dist/index.cjs` are
+  unchanged for Node/bundler consumers. See README "Browser / Thunderbird
+  vendoring" (issue #93).
+
 ## v0.5.2 — 2026-07-04
 - Fixed AWS brand-divergence false positives in display-name brand inference (issue #84).
   Fable 5 analysis of the 2026-07-04 add-on logs found `composite.brandDivergencePhishing`

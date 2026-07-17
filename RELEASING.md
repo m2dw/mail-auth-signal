@@ -284,10 +284,11 @@ extra care:
 The published tarball is restricted by the `files` allowlist in `package.json`:
 
 ```
-dist/index.js        # ESM build
-dist/index.cjs       # CommonJS build
-dist/index.d.ts      # ESM type declarations
-dist/index.d.cts     # CommonJS type declarations
+dist/index.js                          # ESM build
+dist/index.cjs                         # CommonJS build
+dist/index.d.ts                        # ESM type declarations
+dist/index.d.cts                       # CommonJS type declarations
+dist/browser/mail-auth-signal.esm.js   # self-contained browser/Thunderbird ESM bundle (tldts inlined)
 README.md
 LICENSE
 NOTICE

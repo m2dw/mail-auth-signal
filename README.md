@@ -36,6 +36,50 @@ this repository directly.
 Maintainers: see [RELEASING.md](./RELEASING.md) for the versioned release and
 npm publishing process.
 
+### Browser / Thunderbird vendoring
+
+Node and bundler consumers resolve the `tldts` runtime dependency (used for
+[registrable-domain metrics](#registrable-domain-metrics-and-psl-resolver))
+through normal `import`/`require` resolution. Environments that copy a file
+directly instead of running an npm-aware resolver — most notably a
+Thunderbird add-on, since Thunderbird 102-107 do not support import maps —
+cannot resolve the bare `import { getDomain } from "tldts"` that `dist/index.js`
+contains.
+
+For that case, the published package also ships
+**`dist/browser/mail-auth-signal.esm.js`**: the same public API as
+`dist/index.js`, but bundled as a single, self-contained ES module with the
+`tldts` (and its `tldts-core` dependency) source inlined. It has no bare
+module specifiers, so it can be copied byte-for-byte into a WebExtension or
+Thunderbird add-on and loaded with a plain relative `import` — no import map,
+no vendored `tldts` copy, no build step on the consumer side.
+
+```sh
+# From an installed mail-auth-signal package:
+cp node_modules/mail-auth-signal/dist/browser/mail-auth-signal.esm.js \
+   vendor/mail-auth-signal.esm.js
+```
+
+```js
+import { analyzeMessage } from "./vendor/mail-auth-signal.esm.js";
+```
+
+To verify a vendored copy matches the published artifact exactly (e.g. for
+Thunderbird Add-ons third-party file verification), compare its hash against
+the same file fetched from npm or jsDelivr:
+
+```sh
+shasum -a 256 vendor/mail-auth-signal.esm.js
+curl -sL https://cdn.jsdelivr.net/npm/mail-auth-signal/dist/browser/mail-auth-signal.esm.js \
+  | shasum -a 256
+```
+
+This artifact is built from the same `src/` as the Node build (see
+[`tsup.browser.config.ts`](./tsup.browser.config.ts)); it is not hand-maintained. It bundles
+tldts's compiled Public Suffix List data under the terms documented in
+[`NOTICE`](./NOTICE) — attribution requirements apply to the browser artifact
+the same as to `dist/index.js`.
+
 ## Usage
 
 ```ts
@@ -557,6 +601,11 @@ same-organization. The `registrableDomainsMatch` (single domain) and
 `allRegistrableDomainsMatch` (mailbox-list) helpers are exported so callers can
 run the same comparison over their own domains. License attribution for tldts and
 the Public Suffix List data is in `NOTICE`.
+
+Consumers that vendor a single file instead of installing from npm (e.g. a
+Thunderbird add-on) should use `dist/browser/mail-auth-signal.esm.js`, which
+bundles this resolver's `tldts` dependency in — see
+[Browser / Thunderbird vendoring](#browser--thunderbird-vendoring).
 
 ### Public mailbox provider catalog
 
