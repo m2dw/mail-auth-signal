@@ -52,7 +52,7 @@ logic, it becomes a new follow-up at that time.
 | Add-on core module | Classification | Basis |
 |---|---|---|
 | `jaroWinkler.js` (Jaro-Winkler string similarity) | **Migrated** | Ported as `src/jaroWinkler.ts`, exporting `computeJaro` and `computeJaroWinkler`. Tests in `test/jaroWinkler.test.ts` (fixtures + invariants). See issue #50. |
-| `bigramNaturalness.js` (bigram "naturalness" scoring) | **Decided: caller-owned (injectable)** | A meaningful naturalness score needs a language-frequency dataset; bundling one crosses the data/license boundary in `AGENTS.md`. Resolved in #66: the library does not bundle a corpus, but `computeRandomLookingCandidate(token, { isNatural })` accepts the caller's model so a caller holding a license-cleared corpus reaches full add-on parity. The *algorithm/corpus* stays caller-owned; the *injection point* is migrated. |
+| `bigramNaturalness.js` (bigram "naturalness" scoring) | **Decided: caller-owned (injectable)** | A meaningful naturalness score needs a language-frequency dataset; bundling one crosses the data/license boundary in `AGENTS.md`. Resolved in #66: the library does not bundle a corpus, but `computeRandomLookingCandidate(token, { isNatural })` accepts the caller's model so a caller holding a license-cleared corpus reaches full add-on parity. The *algorithm/corpus* stays caller-owned; the *injection point* is migrated. Issue #98 added a numeric injection point: `computeRegistrableLabelNaturalness` / `MetricsDependencies.scoreLabelNaturalness` identify the PSL registrable-domain label and record the caller model's value (`senderIdentity.fromRegistrableLabelNaturalness`) with no threshold or score. The add-on's pseudo-count table is still not imported. |
 | `customFormulas.js` (user-defined scoring formulas) | **Not core** | Caller-configurable scoring/policy. The core emits observations; callers compose formulas and thresholds. |
 | `whitelist.js` (allow-list matching) | **Not core** | Allow/block lists are explicitly caller-owned by `AGENTS.md`. The data and the trust decision belong to the caller. |
 | `scoring.js` (weights / thresholds) | **Not core** | Local scoring weights and thresholds are policy. The core returns severity-tagged signals; callers score and decide. |
@@ -119,6 +119,7 @@ Thunderbird integration shell (caller-owned):
 | Lexical "randomness" heuristics (entropy, vowel ratio, runs, transitions) | `src/senderIdentity.ts` (`computeLexicalHeuristics`) | `test/` lexical tests | #41 |
 | Layer 3 lexical parity: alpha length, y-inclusive vowel count/ratio, raw hyphen/unique counts, symbol-skipping letter/digit transitions, digit-required hex-like run | `src/senderIdentity.ts` (`computeLexicalHeuristics`) | `test/lexicalHeuristics.test.ts` | #66 |
 | Random-looking local-part / domain-label check (length, vowel/consonant, hex/digit shapes, letters-only uppercase) | `src/senderIdentity.ts` (`computeRandomLookingCandidate`) | `test/lexicalHeuristics.test.ts` | #66 |
+| Registrable-domain label identification + caller-model naturalness observation (numeric; no corpus, no threshold) | `src/labelNaturalness.ts` (`computeRegistrableLabelNaturalness`), `MetricsDependencies.scoreLabelNaturalness` | `test/labelNaturalness.test.ts` | #98 |
 | Jaro-Winkler string-similarity helper (`computeJaro`, `computeJaroWinkler`) | `src/jaroWinkler.ts` | `test/jaroWinkler.test.ts` (fixtures + invariants) | #50 |
 | Jaccard (bigram) string-similarity helper (`computeJaccard`) | `src/jaccard.ts` | `test/brandInference.test.ts` | #64 |
 | Display-name brand inference: Latin diacritic folding, brand-token normalization, catalog matching (Jaro-Winkler + Jaccard), brand/domain-mismatch fact and `displayName.brandDomainMismatch` signal — logic only; catalog is caller-supplied data | `src/brandInference.ts`, `src/rules/displayNameBrandDomainMismatch.ts` | `test/brandInference.test.ts` | #64 (rel. #59) |
@@ -168,6 +169,12 @@ in issue #50 as `src/jaroWinkler.ts` — see the Migrated table above.)*
    caller-supplied naturalness model so the corpus-dependent class (structurally
    word-like gibberish such as `wlikqkgi`, indistinguishable by shape from a real
    word such as `switchbot`) is flagged only when the caller injects its own model.
+   Issue #98 extends this with a numeric observation
+   (`computeRegistrableLabelNaturalness`, `MetricsDependencies.scoreLabelNaturalness`):
+   the library identifies the registrable-domain label and records the caller's
+   value, but the model, thresholds, and Junk/Review policy remain caller-owned. The
+   add-on can later consume this output and retire its duplicated label-extraction
+   and metric plumbing in a separate change.
 2. **Any future bundling of brand / word-list / n-gram data.** Remains a
    license decision (covers `whitelist.js` reference data). Listed here so the
    boundary is an explicit recorded decision, not an oversight. The PSL

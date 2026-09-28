@@ -504,6 +504,7 @@ verdict** — it exposes facts a caller can combine with its own thresholds.
 | `fromDomainIsPublicMailboxProvider` | Whether the From domain is a known public mailbox provider (gmail.com, outlook.com, …) from the built-in catalog. `false` when absent or not in the catalog (see below). |
 | `publicMailboxProviderId` | The matched provider's stable catalog id (`"google"`, `"microsoft"`, …), or `null`. |
 | `brandInference` | Display-name brand / domain-mismatch inference (see below). **Present only** when a caller-supplied brand catalog is provided via `MetricsDependencies.brandCatalog`; omitted entirely otherwise. |
+| `fromRegistrableLabelNaturalness` | The caller-model naturalness observation for the From registrable-domain label (see [Registrable-label naturalness](#registrable-label-naturalness-caller-model)). **Present only** when `MetricsDependencies.scoreLabelNaturalness` is supplied; omitted entirely otherwise. |
 
 `displayName` (`DisplayNameMetrics`) reports `present`, the unquoted `text`, its
 codepoint `length`, `hasNonAscii`, and — the attacker-relevant part — whether the
@@ -888,6 +889,75 @@ corpus. The library does compute a **data-free** structural stand-in,
 `computePronounceability` / `isLikelyNaturalToken` (above): it recognizes the syllable
 *shape* of a pronounceable word without any frequency data, which is enough to guard
 the readable brand-like false positives while staying inside the license boundary.
+
+### Registrable-label naturalness (caller model)
+
+`isNatural` is a boolean gate. A caller that wants the *numeric* value its own
+bigram model assigns to the label a registrant actually chose can use
+`computeRegistrableLabelNaturalness(domain, { scoreLabelNaturalness })`, or pass
+`scoreLabelNaturalness` in `MetricsDependencies` to get
+`senderIdentity.fromRegistrableLabelNaturalness` (`RegistrableLabelNaturalness`).
+
+**What the library computes:** the *registrable-domain label* — the leftmost label
+of the PSL registrable domain — using the built-in resolver (or your
+`getRegistrableDomain`). Compound suffixes resolve correctly, and a random-looking
+label hidden behind an ordinary subdomain is still found:
+
+| Domain | `registrableDomain` | `label` |
+|---|---|---|
+| `dessert.axgporj.com` | `axgporj.com` | `axgporj` |
+| `mail.dcm-hldgs.co.jp` | `dcm-hldgs.co.jp` | `dcm-hldgs` |
+| `acme.github.io` (private suffix) | `github.io` | `acme` (`underPrivateSuffix: true`, `measuredDomain: "acme.github.io"`) |
+
+Beneath a PSL private (delegated-hosting) suffix the tenant label is measured
+rather than the shared provider label, because the tenant is what an attacker
+controls. With a custom `getRegistrableDomain`, the tenant refinement applies only
+when the built-in private-aware domain sits at or beneath your resolver's answer;
+otherwise your registrable domain's label is measured.
+
+**What stays caller-supplied:** the model and every decision about its output. The
+library bundles **no** frequency table or corpus (the add-on's pseudo-count table
+is not imported; its provenance/Apache-2.0 compatibility is unresolved — see
+`MIGRATION-AUDIT.md`), applies no threshold, assigns no points, and emits no signal.
+The value is recorded verbatim on the caller's scale (e.g. average negative log
+probability, higher = less natural).
+
+```ts
+import { analyzeMessage, computeRegistrableLabelNaturalness } from "mail-auth-signal";
+
+computeRegistrableLabelNaturalness("dessert.axgporj.com", {
+  scoreLabelNaturalness: (label) => myBigramModel.avgNegLogProb(label),
+});
+// { domain: "dessert.axgporj.com", registrableDomain: "axgporj.com",
+//   underPrivateSuffix: false, measuredDomain: "axgporj.com",
+//   label: "axgporj", labelLength: 7, score: 5.582, status: "measured" }
+
+const { metrics } = analyzeMessage(input, undefined, {
+  scoreLabelNaturalness: (label) => myBigramModel.avgNegLogProb(label),
+});
+metrics.senderIdentity.fromRegistrableLabelNaturalness?.score;
+```
+
+Contract details:
+
+- **Normalization:** the domain is trimmed, lower-cased, and stripped of one
+  trailing dot; the model receives the lower-cased label.
+- **Short labels** are passed to the model; `labelLength` lets a caller ignore
+  labels too short for a stable bigram estimate.
+- **Punycode (`xn--`) and non-ASCII labels** are identified but not scored
+  (`status: "unsupported-label"`); only ASCII `a-z0-9-` labels reach the model.
+- **Unavailable results** keep `score: null` and explain why in `status`:
+  `no-domain`, `no-registrable-domain` (bare suffix, IP literal, single-label
+  host, or `getRegistrableDomain: () => null`), `no-model` (the label is still
+  reported), `invalid-model` (not a function), `invalid-model-output` (non-number,
+  NaN, or ±Infinity), or `model-error` (the model threw; the error is swallowed).
+- **Rounding:** `score` is rounded to 4 decimals, with `-0` folded to `0`, so
+  fixtures and cross-language ports compare exactly.
+
+Thresholds are caller policy. A single folder-derived export is not enough to pick
+one: at a provisional 5.5, legitimate newsletter senders with abbreviated labels
+(e.g. `dcm-hldgs`) cross it too. A consumer such as the Thunderbird add-on can
+adopt this output and retire its duplicated label extraction in a separate change.
 
 ## Jaro-Winkler string similarity
 

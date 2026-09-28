@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.6.0 — 2026-09-29
+
+- Added `computeRegistrableLabelNaturalness` and the opt-in
+  `MetricsDependencies.scoreLabelNaturalness` dependency (issue #98). The library
+  identifies the PSL registrable-domain label (`dessert.axgporj.com` -> `axgporj`,
+  `mail.dcm-hldgs.co.jp` -> `dcm-hldgs`, the tenant label beneath private suffixes)
+  and records a caller-supplied model's numeric value as
+  `senderIdentity.fromRegistrableLabelNaturalness`, with an explicit `status` when
+  the domain, label, or model output is unavailable. No corpus is bundled and no
+  threshold, score, or signal is applied; the field is omitted unless the caller
+  supplies a model.
+- Fixed superlinear (polynomial ReDoS) parsing of untrusted header text
+  (issue #99). The bare-mailbox fallback in `extractDomainFromMailbox` /
+  `parseFromMailbox`, the embedded-address search in `extractEmbeddedDomains`,
+  and the Authentication-Results property parser used unanchored regexes that
+  rescanned long delimiter-free runs (e.g. local-part-like text with no `@`, or
+  property-like text with no `=`) from every position. They are now linear-time
+  scanners with the same structured results, and the quoted-display-name skip
+  for angle-addrs no longer rescans the value per candidate. `analyzeMessage`
+  and the exported helpers are covered; no header length limit is imposed.
+
 ## v0.5.3 — 2026-07-16
 
 - Added `dist/browser/mail-auth-signal.esm.js`, a self-contained ESM build with

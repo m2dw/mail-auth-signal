@@ -5,6 +5,7 @@ import {
   parseFromMailbox,
   registrableDomainsMatch,
 } from "./domains.js";
+import { computeRegistrableLabelNaturalness } from "./labelNaturalness.js";
 import { getRegistrableDomain as builtinGetRegistrableDomain } from "./psl.js";
 import { lookupPublicMailboxProvider } from "./publicMailboxProviders.js";
 import type {
@@ -808,6 +809,16 @@ export function computeSenderIdentity(
       ? undefined
       : computeDisplayNameBrandInference(displayText, fromDomain, brandCatalog, structuralResolver);
 
+  // Registrable-label naturalness is likewise opt-in: the core bundles no
+  // frequency table, so the field exists only when the caller supplies a model.
+  const fromRegistrableLabelNaturalness =
+    deps?.scoreLabelNaturalness === undefined
+      ? undefined
+      : computeRegistrableLabelNaturalness(fromDomain, {
+          getRegistrableDomain: structuralResolver,
+          scoreLabelNaturalness: deps.scoreLabelNaturalness,
+        });
+
   return {
     displayName,
     localPart,
@@ -821,5 +832,6 @@ export function computeSenderIdentity(
     fromDomainIsPublicMailboxProvider: publicMailboxProviderId !== null,
     publicMailboxProviderId,
     ...(brandInference !== undefined ? { brandInference } : {}),
+    ...(fromRegistrableLabelNaturalness !== undefined ? { fromRegistrableLabelNaturalness } : {}),
   };
 }

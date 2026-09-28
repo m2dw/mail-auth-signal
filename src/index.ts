@@ -35,6 +35,7 @@ export {
   isLikelyNaturalToken,
 } from "./senderIdentity.js";
 export type { RandomLookingOptions } from "./senderIdentity.js";
+export { computeRegistrableLabelNaturalness } from "./labelNaturalness.js";
 export {
   defaultPublicMailboxProviders,
   lookupPublicMailboxProvider,
@@ -114,6 +115,7 @@ export type {
   DomainParts,
   HeaderInput,
   HeaderLine,
+  LabelNaturalnessModel,
   LexicalHeuristics,
   LexicalStats,
   MessageMetrics,
@@ -121,6 +123,8 @@ export type {
   OrganizationalAlignment,
   Pronounceability,
   PublicMailboxProvider,
+  RegistrableLabelNaturalness,
+  RegistrableLabelNaturalnessStatus,
   SenderIdentityMetrics,
   SpfResult,
   Rule,

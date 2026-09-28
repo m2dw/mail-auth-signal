@@ -91,6 +91,12 @@ describe("browser artifact — no unresolved bare specifiers", () => {
       if (!result.metrics.senderIdentity) {
         throw new Error("missing senderIdentity in analyzeMessage result");
       }
+      const naturalness = mod.computeRegistrableLabelNaturalness("dessert.axgporj.com", {
+        scoreLabelNaturalness: () => 5.582,
+      });
+      if (naturalness.label !== "axgporj" || naturalness.score !== 5.582) {
+        throw new Error("unexpected label naturalness: " + JSON.stringify(naturalness));
+      }
       `,
       "utf8",
     );
