@@ -889,6 +889,12 @@ export type DisplayNameBrandInference = {
  *                     bundles no brand list and brand inference is meaningless
  *                     without caller data. An optional field rather than a null one
  *                     so consumers that never opt in see no brand surface at all.
+ * - fromRegistrableLabelNaturalness: the caller-model naturalness observation for
+ *                     the From registrable-domain label (see
+ *                     RegistrableLabelNaturalness). Present **only** when the
+ *                     caller supplies MetricsDependencies.scoreLabelNaturalness;
+ *                     omitted otherwise, for the same reason as brandInference.
+ *                     When present but From is absent, status is "no-domain".
  */
 export type SenderIdentityMetrics = {
   displayName: DisplayNameMetrics;
@@ -901,6 +907,86 @@ export type SenderIdentityMetrics = {
   fromDomainIsPublicMailboxProvider: boolean;
   publicMailboxProviderId: string | null;
   brandInference?: DisplayNameBrandInference;
+  fromRegistrableLabelNaturalness?: RegistrableLabelNaturalness;
+};
+
+/**
+ * A caller-supplied naturalness model for a single domain label (see
+ * MetricsDependencies.scoreLabelNaturalness). Receives the lower-cased ASCII
+ * label and returns a finite number on the caller's own scale — typically the
+ * average negative log probability of the label's character bigrams under the
+ * caller's corpus, where higher reads *less* natural. The core never interprets
+ * the direction or magnitude; it only records the value.
+ */
+export type LabelNaturalnessModel = (label: string) => number;
+
+/**
+ * Why RegistrableLabelNaturalness has (or lacks) a score:
+ *
+ * - "measured":              the model returned a finite number; `score` is set.
+ * - "no-domain":             the domain was absent or empty after normalization.
+ * - "no-registrable-domain": the resolver returned null (bare suffix, IP
+ *                            literal, single-label host, or PSL opted out).
+ * - "unsupported-label":     the label is punycode (`xn--`) or contains
+ *                            characters outside ASCII `a-z0-9-`; a letter
+ *                            bigram model over those is not meaningful, so the
+ *                            model is not called.
+ * - "no-model":              no model was supplied (the label is still reported).
+ * - "invalid-model":         a model was supplied but is not a function.
+ * - "invalid-model-output":  the model returned a non-number, NaN, or ±Infinity.
+ * - "model-error":           the model threw; the error is swallowed so a
+ *                            faulty caller model never aborts metric extraction.
+ */
+export type RegistrableLabelNaturalnessStatus =
+  | "measured"
+  | "no-domain"
+  | "no-registrable-domain"
+  | "unsupported-label"
+  | "no-model"
+  | "invalid-model"
+  | "invalid-model-output"
+  | "model-error";
+
+/**
+ * The naturalness observation for a domain's *registrable-domain label* — the
+ * leftmost label of the registrable domain (`axgporj` in `dessert.axgporj.com`,
+ * `dcm-hldgs` in `mail.dcm-hldgs.co.jp`), i.e. the label a registrant actually
+ * chose. The core bundles no frequency table or corpus (see AGENTS.md / NOTICE):
+ * the label is identified here, but its score comes only from a caller-supplied
+ * LabelNaturalnessModel. A policy-neutral fact, not a verdict — no threshold,
+ * weight, or points are applied; the caller owns all of that.
+ *
+ * - domain:              the normalized (trimmed, lower-cased, trailing-dot-free)
+ *                        domain, or null when absent.
+ * - registrableDomain:   the resolver's registrable domain (the same value as
+ *                        DomainParts.registrableDomain), or null.
+ * - underPrivateSuffix:  whether the domain sits beneath a PSL private
+ *                        (delegated-hosting) suffix such as `github.io` or
+ *                        `s3.amazonaws.com`. When true, the measured label is the
+ *                        tenant label (`acme` in `acme.github.io`), not the shared
+ *                        provider label (`github`), because the tenant is what an
+ *                        attacker controls.
+ * - measuredDomain:      the domain whose leftmost label is measured —
+ *                        registrableDomain, or the private-aware registrable
+ *                        domain when underPrivateSuffix. null when unresolved.
+ * - label:               the measured label, or null when unresolved. Reported
+ *                        even when the score is unavailable.
+ * - labelLength:         codepoint length of label (0 when null). Very short
+ *                        labels are still passed to the model; a caller that
+ *                        distrusts bigram scores on short labels filters on this.
+ * - score:               the model's value rounded to 4 decimals (-0 folded to
+ *                        0), or null unless status is "measured".
+ * - status:              see RegistrableLabelNaturalnessStatus.
+ */
+export type RegistrableLabelNaturalness = {
+  domain: string | null;
+  registrableDomain: string | null;
+  underPrivateSuffix: boolean;
+  measuredDomain: string | null;
+  label: string | null;
+  labelLength: number;
+  score: number | null;
+  status: RegistrableLabelNaturalnessStatus;
 };
 
 /**
@@ -961,11 +1047,20 @@ export type PublicMailboxProvider = {
  *   data, kept out of the serializable AnalyzeInput like the rest of
  *   MetricsDependencies. An empty array opts in but matches nothing (the inference
  *   reports an "empty-catalog" not-applicable reason).
+ *
+ * - scoreLabelNaturalness: a caller-supplied naturalness model (see
+ *   LabelNaturalnessModel) enabling SenderIdentityMetrics.fromRegistrableLabelNaturalness.
+ *   Like brandCatalog there is **no built-in default** — a frequency table/corpus
+ *   is external data this package does not bundle — so the field is omitted when
+ *   this key is absent. Any other value opts in: `null` reports status
+ *   "no-model" and any other non-function reports "invalid-model", so a
+ *   misconfigured caller sees an explicit status rather than a silent omission.
  */
 export type MetricsDependencies = {
   getRegistrableDomain?: (domain: string) => string | null;
   publicMailboxProviders?: readonly PublicMailboxProvider[];
   brandCatalog?: readonly BrandCatalogEntry[];
+  scoreLabelNaturalness?: LabelNaturalnessModel;
 };
 
 /**

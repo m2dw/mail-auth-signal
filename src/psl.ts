@@ -41,7 +41,17 @@ export function getRegistrableDomain(domain: string): string | null {
  * *stricter* (never manufactures a match). Issue #84 follow-up.
  */
 export function isUnderPrivateSuffix(domain: string): boolean {
+  return getPrivateAwareRegistrableDomain(domain) !== null;
+}
+
+/**
+ * The private-aware registrable domain (e.g. `acme.github.io`) when `domain` sits
+ * underneath a PSL private suffix (see isUnderPrivateSuffix), else null.
+ */
+export function getPrivateAwareRegistrableDomain(domain: string): string | null {
   const icannRegistrable = getDomain(domain, { allowPrivateDomains: false });
   const privateRegistrable = getDomain(domain, { allowPrivateDomains: true });
-  return privateRegistrable !== null && privateRegistrable !== icannRegistrable;
+  return privateRegistrable !== null && privateRegistrable !== icannRegistrable
+    ? privateRegistrable
+    : null;
 }

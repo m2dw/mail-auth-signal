@@ -3,7 +3,7 @@ export function extractDomainFromMailbox(value: string | null): string | null {
 
   // Strip RFC 5322 comments first. A valid mailbox can carry a comment before a
   // bare addr-spec, e.g. `(billing@evil.test, Alice) alice@example.com`; without
-  // removing it the fallback regex would scan from the start and pull the
+  // removing it the bare-address fallback would scan from the start and pull the
   // attacker domain out of the comment instead of the real reply target.
   const withoutComments = stripComments(value);
 
@@ -14,8 +14,77 @@ export function extractDomainFromMailbox(value: string | null): string | null {
   // The captured domain excludes '@' so a malformed multi-'@' address does not
   // yield a bogus domain that could trigger a spurious consistency signal.
   const angleMatch = firstAngleAddrOutsideQuotes(withoutComments);
-  const domain = angleMatch?.[2] ?? /[^<>@\s]+@([^<>@\s,;]+)/.exec(withoutComments)?.[1];
+  const domain = angleMatch?.[2] ?? findBareMailbox(withoutComments)?.domain;
   return normalizeDomain(domain ?? null);
+}
+
+/**
+ * Characters allowed in the local part of a bare mailbox token. Tested one
+ * UTF-16 unit at a time; every excluded character is in the BMP, so this agrees
+ * with a regex character class evaluated over code points.
+ */
+const MAILBOX_LOCAL_EXCLUDED = /[<>@\s]/;
+/**
+ * Sticky domain run of a bare mailbox token. A lone greedy class with nothing
+ * after it matches maximally on its first try, so it never backtracks.
+ */
+const MAILBOX_DOMAIN_RUN = /[^<>@\s,;]+/y;
+const EMBEDDED_LOCAL_EXCLUDED = /[\s<>@,;"']/;
+const EMBEDDED_DOMAIN_RUN = /[\p{L}\p{N}.-]+/uy;
+
+type AddressToken = {
+  localPart: string;
+  domain: string;
+  /** Index just past the domain, where a global search resumes. */
+  end: number;
+};
+
+/**
+ * Find the leftmost `local@domain` token at or after `from` in linear time.
+ *
+ * This is the bounded-work replacement for unanchored searches such as
+ * `/([^<>@\s]+)@([^<>@\s,;]+)/`. Those regexes restart at every position of a
+ * long delimiter-free run and rescan it to the end looking for an '@', which is
+ * quadratic in attacker-controlled header text (e.g. a 100 KB local-part-like
+ * run with no '@'). The result is identical to the regex: the local part is the
+ * whole run of local characters ending at an '@' (the leftmost regex start is
+ * the start of that run, clamped to `from`), and the domain is the maximal
+ * domain run after it. An '@' with an empty local run or empty domain run is
+ * skipped, exactly as the regex fails there and moves on.
+ *
+ * Each character is visited once by the forward scan, and the domain run after
+ * an '@' is only read when it produces the match, so total work is O(n).
+ */
+function findAddressToken(
+  value: string,
+  from: number,
+  localExcluded: RegExp,
+  domainRun: RegExp,
+): AddressToken | null {
+  let runStart = -1;
+  for (let i = from; i < value.length; i++) {
+    const char = value[i] as string;
+    if (char === "@") {
+      if (runStart !== -1) {
+        domainRun.lastIndex = i + 1;
+        const domain = domainRun.exec(value)?.[0];
+        if (domain) {
+          return { localPart: value.slice(runStart, i), domain, end: i + 1 + domain.length };
+        }
+      }
+      runStart = -1;
+    } else if (localExcluded.test(char)) {
+      runStart = -1;
+    } else if (runStart === -1) {
+      runStart = i;
+    }
+  }
+  return null;
+}
+
+/** First bare `local@domain` addr-spec in a mailbox value (no angle brackets). */
+function findBareMailbox(value: string): AddressToken | null {
+  return findAddressToken(value, 0, MAILBOX_LOCAL_EXCLUDED, MAILBOX_DOMAIN_RUN);
 }
 
 /**
@@ -452,10 +521,10 @@ export function parseFromMailbox(value: string | null): {
     const lt = angleMatch.index;
     displayName = lt > 0 ? unquoteDisplayName(withoutComments.slice(0, lt)) : null;
   } else {
-    const bare = /([^<>@\s]+)@([^<>@\s,;]+)/.exec(withoutComments);
+    const bare = findBareMailbox(withoutComments);
     if (bare) {
-      localPartRaw = bare[1] ?? null;
-      domainRaw = bare[2] ?? null;
+      localPartRaw = bare.localPart;
+      domainRaw = bare.domain;
     }
   }
 
@@ -487,32 +556,31 @@ function unquoteDisplayName(value: string): string {
  * including an address-shaped `<...@...>` fragment. The real mailbox is always
  * the angle-addr outside the quoted phrase, so an inner fragment must be skipped
  * rather than taken as the first match.
+ *
+ * Every match starts at a '<' and its classes exclude '<', so the regex work is
+ * linear. The quote state is carried forward across matches rather than
+ * rescanned from the start for each one, so many quoted `<a@b.c>` fragments
+ * cannot make the skip quadratic either.
  */
 function firstAngleAddrOutsideQuotes(value: string): RegExpExecArray | null {
   const re = /<([^<>@\s]+)@([^<>@\s]+)>/g;
   let match: RegExpExecArray | null;
+  let inQuotes = false;
+  let i = 0;
   while ((match = re.exec(value)) !== null) {
-    if (!isIndexInsideQuotes(value, match.index)) return match;
+    // Whether the '<' lies inside a double-quoted phrase, honoring backslash
+    // escapes (`\"` does not close the quote).
+    for (; i < match.index; i++) {
+      const ch = value[i];
+      if (inQuotes && ch === "\\") {
+        i += 1; // skip the escaped character
+        continue;
+      }
+      if (ch === '"') inQuotes = !inQuotes;
+    }
+    if (!inQuotes) return match;
   }
   return null;
-}
-
-/**
- * Whether the character at `index` lies inside a double-quoted phrase, honoring
- * backslash escapes (`\"` does not close the quote). Used to keep address
- * extraction from reaching into a quoted display name.
- */
-function isIndexInsideQuotes(value: string, index: number): boolean {
-  let inQuotes = false;
-  for (let i = 0; i < index; i++) {
-    const ch = value[i];
-    if (inQuotes && ch === "\\") {
-      i += 1; // skip the escaped character
-      continue;
-    }
-    if (ch === '"') inQuotes = !inQuotes;
-  }
-  return inQuotes;
 }
 
 /**
@@ -522,6 +590,9 @@ function isIndexInsideQuotes(value: string, index: number): boolean {
  * domain is normalized and dotless/unparseable hosts are dropped; duplicates are
  * removed while preserving encounter order. Returns an empty array for null,
  * empty, or address-free text.
+ *
+ * Matching is the linear-time equivalent of `/[^\s<>@,;"']+@([\p{L}\p{N}.-]+)/gu`
+ * (see findAddressToken), so a long address-free display name costs O(n).
  */
 export function extractEmbeddedDomains(text: string | null): string[] {
   if (!text) return [];
@@ -529,11 +600,12 @@ export function extractEmbeddedDomains(text: string | null): string[] {
   // The domain class admits Unicode letters/digits (not just ASCII) so that raw
   // IDN and homoglyph domains in a display name — e.g. `"support@раураl.com"` —
   // are still captured; normalizeDomain handles lowercasing and dotted-host checks.
-  const pattern = /[^\s<>@,;"']+@([\p{L}\p{N}.-]+)/gu;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    const domain = normalizeDomain(match[1] ?? null);
+  let token: AddressToken | null;
+  let from = 0;
+  while ((token = findAddressToken(text, from, EMBEDDED_LOCAL_EXCLUDED, EMBEDDED_DOMAIN_RUN)) !== null) {
+    const domain = normalizeDomain(token.domain);
     if (domain) domains.push(domain);
+    from = token.end;
   }
   return [...new Set(domains)];
 }
