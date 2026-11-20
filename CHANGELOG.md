@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.6.1 — 2026-11-20
+
+- Updated development-only build/test dependencies to resolve Dependabot
+  advisories in `vitest`/`@vitest/mocker`, `vite`, `postcss`, `source-map-js`,
+  and `esbuild` (issue #102): `vitest` `^4.1.12` and `tsup` `^9.0.0` (which
+  moves `esbuild` to the fixed `^0.28.2` line). The published package's runtime
+  dependencies, public API, entry points, and `engines.node` (`>=20`) are
+  unchanged; only the maintainer toolchain is affected (see `CONTRIBUTING.md`).
+
 ## v0.6.0 — 2026-09-29
 
 - Added `computeRegistrableLabelNaturalness` and the opt-in
